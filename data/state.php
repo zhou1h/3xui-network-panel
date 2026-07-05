@@ -1,14 +1,10 @@
 ﻿<?php
+if (!defined('XSW_INTERNAL')) { http_response_code(404); exit; }
 return array (
   'version' => '0.1.0',
-  'servers' => 
-  array (
-  ),
-  'lines' => 
-  array (
-  ),
-  'settings' => 
-  array (
+  'servers' => array (),
+  'lines' => array (),
+  'settings' => array (
     'entry_port' => 33000,
     'base_port' => 33100,
     'verify_tls' => false,
@@ -18,55 +14,32 @@ return array (
     'reality_spider_x' => '/',
     'ws_path_prefix' => '/xsw',
   ),
-  'scheduler' => 
-  array (
+  'scheduler' => array (
     'enabled' => false,
     'active_line_id' => '',
     'last_switch_at' => 0,
     'next_switch_at' => 0,
   ),
-  'managed' => 
-  array (
+  'managed' => array (
     'entry_uuid' => '',
-    'entries' => 
-    array (
-    ),
-    'links' => 
-    array (
-    ),
+    'entries' => array (),
+    'links' => array (),
   ),
-  'standalone' => 
-  array (
-    'entries' => 
-    array (
-    ),
+  'standalone' => array (
+    'entries' => array (),
   ),
-  'firewall' => 
-  array (
+  'firewall' => array (
     'active_session_id' => '',
-    'sessions' => 
-    array (
-    ),
-    'reads' => 
-    array (
-    ),
-    'applies' => 
-    array (
-    ),
-    'policy' => 
-    array (
+    'sessions' => array (),
+    'reads' => array (),
+    'applies' => array (),
+    'policy' => array (
       'enabled' => true,
       'deny_ping' => false,
-      'rules' => 
-      array (
-      ),
+      'rules' => array (),
       'persist' => true,
     ),
   ),
-  'last_results' => 
-  array (
-  ),
-  'jobs' => 
-  array (
-  ),
+  'last_results' => array (),
+  'jobs' => array (),
 );

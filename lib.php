@@ -11,8 +11,13 @@ const XSW_SECRET_DIR = XSW_DATA_DIR . '/job-secrets';
 const XSW_STATE_FILE = XSW_DATA_DIR . '/state.php';
 const XSW_CONFIG_FILE = XSW_DATA_DIR . '/config.php';
 const XSW_LOG_FILE = XSW_DATA_DIR . '/logs.php';
+const XSW_LOGIN_ATTEMPTS_FILE = XSW_DATA_DIR . '/login-attempts.php';
 const XSW_SESSION_TTL = 43200;
 const XSW_FIREWALL_SESSION_DIR = XSW_DATA_DIR . '/firewall-sessions';
+
+if (!defined('XSW_INTERNAL')) {
+    define('XSW_INTERNAL', true);
+}
 
 function xsw_bootstrap(): void
 {
@@ -130,9 +135,78 @@ function xsw_save_config(array $config): void
     if (empty($config['app_secret'])) {
         $config['app_secret'] = bin2hex(random_bytes(32));
     }
-    $body = "<?php\nreturn " . var_export($config, true) . ";\n";
+    $body = "<?php\nif (!defined('XSW_INTERNAL')) { http_response_code(404); exit; }\nreturn " . var_export($config, true) . ";\n";
     file_put_contents(XSW_CONFIG_FILE, $body, LOCK_EX);
     @chmod(XSW_CONFIG_FILE, 0600);
+}
+
+function xsw_login_attempts_load(): array
+{
+    if (!is_file(XSW_LOGIN_ATTEMPTS_FILE)) {
+        return [];
+    }
+    $rows = include XSW_LOGIN_ATTEMPTS_FILE;
+    return is_array($rows) ? $rows : [];
+}
+
+function xsw_login_attempts_save(array $rows): void
+{
+    if (!is_dir(XSW_DATA_DIR)) {
+        mkdir(XSW_DATA_DIR, 0700, true);
+    }
+    $body = "<?php\nif (!defined('XSW_INTERNAL')) { http_response_code(404); exit; }\nreturn " . var_export($rows, true) . ";\n";
+    file_put_contents(XSW_LOGIN_ATTEMPTS_FILE, $body, LOCK_EX);
+    @chmod(XSW_LOGIN_ATTEMPTS_FILE, 0600);
+}
+
+function xsw_client_ip(): string
+{
+    return preg_replace('/[^0-9a-fA-F:.]/', '', (string)($_SERVER['REMOTE_ADDR'] ?? 'unknown')) ?: 'unknown';
+}
+
+function xsw_login_attempt_key(): string
+{
+    return hash('sha256', xsw_client_ip() . '|' . (string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
+}
+
+function xsw_login_lock_seconds(): int
+{
+    $rows = xsw_login_attempts_load();
+    $key = xsw_login_attempt_key();
+    $row = $rows[$key] ?? [];
+    $lockedUntil = (int)($row['locked_until'] ?? 0);
+    return max(0, $lockedUntil - time());
+}
+
+function xsw_record_login_failure(): void
+{
+    $now = time();
+    $rows = xsw_login_attempts_load();
+    foreach ($rows as $key => $row) {
+        if ((int)($row['last_at'] ?? 0) < $now - 86400) {
+            unset($rows[$key]);
+        }
+    }
+    $key = xsw_login_attempt_key();
+    $row = $rows[$key] ?? ['count' => 0, 'first_at' => $now, 'last_at' => 0, 'locked_until' => 0];
+    if ((int)($row['first_at'] ?? 0) < $now - 900) {
+        $row = ['count' => 0, 'first_at' => $now, 'last_at' => 0, 'locked_until' => 0];
+    }
+    $row['count'] = (int)($row['count'] ?? 0) + 1;
+    $row['last_at'] = $now;
+    if ($row['count'] >= 8) {
+        $row['locked_until'] = $now + 900;
+    }
+    $rows[$key] = $row;
+    xsw_login_attempts_save($rows);
+}
+
+function xsw_clear_login_failures(): void
+{
+    $rows = xsw_login_attempts_load();
+    $key = xsw_login_attempt_key();
+    unset($rows[$key]);
+    xsw_login_attempts_save($rows);
 }
 
 function xsw_require_login(): void
@@ -156,14 +230,21 @@ function xsw_require_login(): void
         return;
     }
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'login') {
+        $locked = xsw_login_lock_seconds();
+        if ($locked > 0) {
+            $GLOBALS['xsw_login_error'] = '登录失败次数过多，请 ' . max(1, (int)ceil($locked / 60)) . ' 分钟后再试';
+            return;
+        }
         $password = (string)($_POST['password'] ?? '');
         if (password_verify($password, (string)$config['password_hash'])) {
+            xsw_clear_login_failures();
             $_SESSION['xsw_ok'] = true;
             $_SESSION['xsw_seen_at'] = time();
             xsw_refresh_session_cookie();
             header('Location: ' . strtok((string)$_SERVER['REQUEST_URI'], '?'));
             exit;
         }
+        xsw_record_login_failure();
         $GLOBALS['xsw_login_error'] = '密码不对';
         return;
     }
@@ -231,7 +312,7 @@ function xsw_save_state(array $state): void
         mkdir(XSW_DATA_DIR, 0700, true);
     }
     $state['version'] = XSW_VERSION;
-    $body = "<?php\nreturn " . var_export($state, true) . ";\n";
+    $body = "<?php\nif (!defined('XSW_INTERNAL')) { http_response_code(404); exit; }\nreturn " . var_export($state, true) . ";\n";
     file_put_contents(XSW_STATE_FILE, $body, LOCK_EX);
     @chmod(XSW_STATE_FILE, 0600);
 }
