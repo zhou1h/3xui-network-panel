@@ -774,7 +774,7 @@ try {
       --soft:#f3f6fa; --table-head:#f8fafc; --shadow:0 1px 2px rgba(24,36,56,.05),0 8px 24px rgba(24,36,56,.04);
     }
     * { box-sizing:border-box; }
-    html { min-height:100%; }
+    html { min-height:100%; -webkit-text-size-adjust:100%; text-size-adjust:100%; }
     body { margin:0; min-height:100vh; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; background:var(--bg); color:var(--ink); letter-spacing:0; }
     header { position:fixed; left:0; top:0; z-index:12; width:272px; height:78px; display:flex; align-items:center; gap:10px; padding:22px 24px 10px; background:#f7f7f5; border:0; box-shadow:none; }
     header > div:first-child { display:flex; align-items:center; min-width:0; padding-left:14px; }
@@ -827,7 +827,7 @@ try {
     .standalone-submit-row { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:12px; align-items:center; margin-top:12px; }
     .standalone-submit-row .green { justify-self:start; width:auto; }
     .standalone-submit-row .bottom-link { justify-self:end; width:104px; padding-left:0; padding-right:0; }
-    button, .button { display:inline-flex; align-items:center; justify-content:center; min-height:36px; border:1px solid var(--line); border-radius:6px; background:#fff; color:var(--ink); padding:0 12px; font-weight:700; cursor:pointer; text-decoration:none; transition:background .14s ease,border-color .14s ease,color .14s ease,box-shadow .14s ease; }
+    button, .button { display:inline-flex; align-items:center; justify-content:center; min-height:36px; border:1px solid var(--line); border-radius:6px; background:#fff; color:var(--ink); padding:0 12px; font-weight:700; cursor:pointer; text-decoration:none; touch-action:manipulation; -webkit-tap-highlight-color:transparent; transition:background .14s ease,border-color .14s ease,color .14s ease,box-shadow .14s ease; }
     button:hover, .button:hover { border-color:#b8c7da; background:#fbfdff; }
     button.primary { background:var(--primary); border-color:var(--primary); color:#fff; }
     button.primary:hover { background:var(--primary-dark); border-color:var(--primary-dark); }
@@ -974,7 +974,7 @@ try {
     .fw-manual-footer button { min-width:92px; }
     @media (max-width: 1280px) { .content { width:calc(100vw - 272px); padding-right:18px; padding-left:18px; } .fw-actions { grid-template-columns:auto minmax(320px, 1fr) auto auto; } .fw-search { grid-column:1 / -1; max-width:none; } }
     @media (max-width: 1180px) { .form-grid, .server-fields, .health-board, .fw-manual-grid, .fw-manual-auth { grid-template-columns:1fr 1fr; } .server-actions { justify-content:flex-start; } }
-    @media (max-width: 980px) { header { position:static; width:auto; height:auto; padding:14px 16px; background:#fff; border-bottom:1px solid var(--line); justify-content:space-between; } header .pill { display:inline-flex; } main { padding:16px; } .app-layout, .grid, .page-grid, .row, .row.two, .form-grid, .server-fields, .qr-entry, .fw-actions, .fw-manual-grid, .fw-manual-auth, .standalone-submit-row { grid-template-columns:1fr; } .standalone-submit-row .bottom-link { justify-self:start; } .fw-search { grid-column:auto; } .sidebar { position:static; width:auto; max-height:none; overflow:visible; background:transparent; padding:0; margin-bottom:16px; } .sidebar-logout { margin-top:8px; padding-top:0; } .sidebar-logout button { width:auto; border:1px solid var(--line); border-radius:6px; background:#fff; justify-content:center; min-height:36px; font-size:14px; } .content { width:100%; padding:0; grid-column:auto; } .page-lines .server-strip { grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); } }
+    @media (max-width: 980px) { input, select, textarea, button, .button { font-size:16px; } header { position:static; width:auto; height:auto; padding:14px 16px; background:#fff; border-bottom:1px solid var(--line); justify-content:space-between; } header .pill { display:inline-flex; } main { padding:16px; } .app-layout, .grid, .page-grid, .row, .row.two, .form-grid, .server-fields, .qr-entry, .fw-actions, .fw-manual-grid, .fw-manual-auth, .standalone-submit-row { grid-template-columns:1fr; } .standalone-submit-row .bottom-link { justify-self:start; } .fw-search { grid-column:auto; } .sidebar { position:static; width:auto; max-height:none; overflow:visible; background:transparent; padding:0; margin-bottom:16px; } .sidebar-logout { margin-top:8px; padding-top:0; } .sidebar-logout button { width:auto; border:1px solid var(--line); border-radius:6px; background:#fff; justify-content:center; min-height:36px; } .content { width:100%; padding:0; grid-column:auto; } .page-lines .server-strip { grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); } }
   </style>
 </head>
 <body data-page="<?= xsw_h($page) ?>">

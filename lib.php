@@ -183,12 +183,14 @@ function xsw_render_login(): void
   <style>
     :root { color-scheme: light; --ink:#111827; --muted:#5b6472; --line:#d7dde5; --bg:#f4f6f8; --panel:#fff; --primary:#1f4e79; --red:#b42318; }
     * { box-sizing: border-box; }
+    html { -webkit-text-size-adjust:100%; text-size-adjust:100%; }
     body { margin:0; min-height:100vh; display:grid; place-items:center; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--ink); }
     main { width:min(420px, calc(100vw - 32px)); background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:28px; box-shadow:0 18px 50px rgba(17,24,39,.10); }
     h1 { margin:0 0 18px; font-size:22px; letter-spacing:0; }
     label { display:block; font-size:13px; color:var(--muted); margin-bottom:7px; }
     input { width:100%; height:44px; border:1px solid var(--line); border-radius:6px; padding:0 12px; font-size:16px; }
-    button { width:100%; height:42px; border:0; border-radius:6px; margin-top:16px; background:var(--primary); color:#fff; font-weight:700; cursor:pointer; }
+    button { width:100%; height:42px; border:0; border-radius:6px; margin-top:16px; background:var(--primary); color:#fff; font-weight:700; cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
+    @media (max-width: 980px) { input, button { font-size:16px; } }
     .error { color:var(--red); margin:12px 0 0; font-size:14px; }
   </style>
 </head>
