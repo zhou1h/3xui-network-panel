@@ -1109,12 +1109,18 @@ try {
                   $detail = (string)($row['error'] ?? '');
                   if (!empty($row['ok'])) {
                       $xray = $row['summary']['xray'] ?? [];
+                      $disk = $row['summary']['disk'] ?? [];
                       $detail = (string)(($row['ms'] ?? 0) . ' ms');
                       if (is_array($xray) && !empty($xray['state'])) {
                           $detail .= ' · Xray ' . (string)$xray['state'];
                       }
                       if (is_array($xray) && !empty($xray['errorMsg'])) {
                           $detail .= ' · ' . (string)$xray['errorMsg'];
+                      }
+                      if (is_array($disk) && (float)($disk['total'] ?? 0) > 0) {
+                          $usedGiB = (float)($disk['current'] ?? 0) / 1073741824;
+                          $totalGiB = (float)$disk['total'] / 1073741824;
+                          $detail .= ' · 磁盘 ' . number_format($usedGiB, 1) . ' / ' . number_format($totalGiB, 1) . ' GiB';
                       }
                   }
               }
