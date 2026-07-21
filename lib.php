@@ -3,9 +3,9 @@ declare(strict_types=1);
 
 date_default_timezone_set('Asia/Shanghai');
 
-const XSW_VERSION = '0.1.0';
-const XSW_PREFIX = 'jd_';
-const XSW_LEGACY_PREFIX = 'xsw_';
+const XSW_VERSION = '0.2.0';
+const XSW_PREFIX = 'xsw_';
+const XSW_LEGACY_PREFIX = 'jd_';
 const XSW_DATA_DIR = __DIR__ . '/data';
 const XSW_SECRET_DIR = XSW_DATA_DIR . '/job-secrets';
 const XSW_STATE_FILE = XSW_DATA_DIR . '/state.php';
@@ -84,6 +84,14 @@ function xsw_default_state(): array
             'entry_port' => 33000,
             'base_port' => 33100,
             'verify_tls' => false,
+            'reality_auto_target' => true,
+            'reality_candidates' => [
+                'www.microsoft.com',
+                'www.apple.com',
+                'www.cloudflare.com',
+                'www.amazon.com',
+                'www.mozilla.org',
+            ],
             'reality_sni' => 'www.cloudflare.com',
             'reality_dest' => 'www.cloudflare.com:443',
             'reality_fingerprint' => 'chrome',
@@ -124,17 +132,15 @@ function xsw_default_state(): array
 function xsw_load_config(): array
 {
     if (!is_file(XSW_CONFIG_FILE)) {
-        return ['password_hash' => '', 'app_secret' => ''];
+        return ['password_hash' => ''];
     }
     $config = include XSW_CONFIG_FILE;
-    return is_array($config) ? $config : ['password_hash' => '', 'app_secret' => ''];
+    return is_array($config) ? $config : ['password_hash' => ''];
 }
 
 function xsw_save_config(array $config): void
 {
-    if (empty($config['app_secret'])) {
-        $config['app_secret'] = bin2hex(random_bytes(32));
-    }
+    unset($config['app_secret']);
     $body = "<?php\nif (!defined('XSW_INTERNAL')) { http_response_code(404); exit; }\nreturn " . var_export($config, true) . ";\n";
     file_put_contents(XSW_CONFIG_FILE, $body, LOCK_EX);
     @chmod(XSW_CONFIG_FILE, 0600);
@@ -221,7 +227,7 @@ function xsw_require_login(): void
     $config = xsw_load_config();
     if (empty($config['password_hash'])) {
         http_response_code(503);
-        echo 'JD is not initialized.';
+        echo 'The panel is not initialized. Run: sudo bash install.sh';
         exit;
     }
     if (!empty($_SESSION['xsw_ok'])) {
@@ -260,7 +266,7 @@ function xsw_render_login(): void
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>JD</title>
+  <title>3x-ui Network Panel</title>
   <style>
     :root { color-scheme: light; --ink:#111827; --muted:#5b6472; --line:#d7dde5; --bg:#f4f6f8; --panel:#fff; --primary:#1f4e79; --red:#b42318; }
     * { box-sizing: border-box; }
@@ -277,7 +283,7 @@ function xsw_render_login(): void
 </head>
 <body>
 <main>
-  <h1>JD</h1>
+  <h1>3x-ui Network Panel</h1>
   <form method="post">
     <input type="hidden" name="action" value="login">
     <label for="password">管理密码</label>
@@ -922,14 +928,14 @@ function xsw_standalone_remark(array $entry): string
     if (!empty($entry['remark'])) {
         return (string)$entry['remark'];
     }
-    return 'JD Single ' . (string)($entry['name'] ?? $entry['id'] ?? 'entry');
+    return trim((string)($entry['name'] ?? $entry['id'] ?? 'entry'));
 }
 
 function xsw_new_standalone_remark(array $entry): string
 {
     $name = trim((string)($entry['name'] ?? 'entry'));
     $id = preg_replace('/[^A-Za-z0-9_-]/', '', (string)($entry['id'] ?? ''));
-    return 'JD Single ' . ($name !== '' ? $name : 'entry') . ($id !== '' ? ' · ' . $id : '');
+    return ($name !== '' ? $name : 'entry') . ($id !== '' ? ' · ' . $id : '');
 }
 
 function xsw_standalone_delete_remarks(array $entry): array
@@ -937,6 +943,7 @@ function xsw_standalone_delete_remarks(array $entry): array
     $name = trim((string)($entry['name'] ?? $entry['id'] ?? 'entry'));
     return array_values(array_unique(array_filter([
         xsw_standalone_remark($entry),
+        $name,
         'JD Single ' . $name,
         'XSW Single ' . $name,
     ])));
@@ -1192,11 +1199,11 @@ function xsw_build_plan(array &$state): array
         if (empty($state['managed']['entries'][$lineId]['short_id'])) {
             $state['managed']['entries'][$lineId]['short_id'] = xsw_random_hex(4);
         }
-        if (empty($state['managed']['entries'][$lineId]['sni'])) {
-            $state['managed']['entries'][$lineId]['sni'] = (string)($settings['reality_sni'] ?? 'www.cloudflare.com');
-        }
-        if (empty($state['managed']['entries'][$lineId]['dest'])) {
-            $state['managed']['entries'][$lineId]['dest'] = (string)($settings['reality_dest'] ?? 'www.cloudflare.com:443');
+        if (empty($state['managed']['entries'][$lineId]['sni']) || empty($state['managed']['entries'][$lineId]['dest'])) {
+            $target = xsw_select_reality_target($settings);
+            $state['managed']['entries'][$lineId]['sni'] = $target['sni'];
+            $state['managed']['entries'][$lineId]['dest'] = $target['dest'];
+            $state['managed']['entries'][$lineId]['target_latency_ms'] = $target['latency_ms'];
         }
         if (empty($state['managed']['entries'][$lineId]['fingerprint'])) {
             $state['managed']['entries'][$lineId]['fingerprint'] = (string)($settings['reality_fingerprint'] ?? 'chrome');
@@ -1219,7 +1226,7 @@ function xsw_build_plan(array &$state): array
             'fingerprint' => $state['managed']['entries'][$lineId]['fingerprint'],
             'spider_x' => $state['managed']['entries'][$lineId]['spider_x'],
             'inbound_tag' => 'inbound-' . $entryLinePort,
-            'remark' => 'JD Entry ' . $line['name'],
+            'remark' => $line['name'] . ' · entry',
         ];
         for ($i = 0; $i < count($path) - 1; $i++) {
             $from = $path[$i];
@@ -1250,7 +1257,7 @@ function xsw_build_plan(array &$state): array
                 'ws_path' => $state['managed']['links'][$key]['ws_path'],
                 'inbound_tag' => 'inbound-' . $port,
                 'outbound_tag' => xsw_tag('to_' . $line['id'] . '_' . $from . '_' . $to),
-                'remark' => 'JD ' . $line['name'] . ' ' . $from . '->' . $to,
+                'remark' => $line['name'] . ' · ' . $from . '→' . $to,
             ];
             $edgeIndex++;
         }
@@ -1271,12 +1278,97 @@ function xsw_is_managed_tag(string $tag): bool
 
 function xsw_is_managed_remark(string $remark): bool
 {
-    return str_starts_with($remark, 'JD') || str_starts_with($remark, 'XSW');
+    return str_starts_with($remark, 'JD')
+        || str_starts_with($remark, 'XSW')
+        || preg_match('/ · (?:entry|single\d+)$/i', $remark) === 1
+        || preg_match('/ · [A-Z0-9_-]+→[A-Z0-9_-]+$/u', $remark) === 1;
 }
 
 function xsw_random_hex(int $bytes): string
 {
     return bin2hex(random_bytes($bytes));
+}
+
+function xsw_reality_candidate_hosts(array $settings): array
+{
+    $configured = is_array($settings['reality_candidates'] ?? null)
+        ? $settings['reality_candidates']
+        : [];
+    $configured[] = (string)($settings['reality_sni'] ?? 'www.cloudflare.com');
+    $hosts = [];
+    foreach ($configured as $candidate) {
+        $candidate = strtolower(trim((string)$candidate));
+        $candidate = preg_replace('#^https?://#', '', $candidate);
+        $candidate = preg_replace('#[:/].*$#', '', (string)$candidate);
+        if ($candidate === '' || filter_var($candidate, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) {
+            continue;
+        }
+        $hosts[$candidate] = true;
+    }
+    return array_keys($hosts);
+}
+
+function xsw_probe_reality_candidate(string $host): ?float
+{
+    if (!function_exists('curl_init')) {
+        return null;
+    }
+    $ch = curl_init('https://' . $host . '/');
+    $options = [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_NOBODY => true,
+        CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_CONNECTTIMEOUT_MS => 1800,
+        CURLOPT_TIMEOUT_MS => 3500,
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_SSL_VERIFYHOST => 2,
+        CURLOPT_USERAGENT => 'Mozilla/5.0 (compatible; 3x-ui-network-panel/0.2)',
+    ];
+    if (defined('CURL_SSLVERSION_TLSv1_3')) {
+        $options[CURLOPT_SSLVERSION] = CURL_SSLVERSION_TLSv1_3;
+    }
+    curl_setopt_array($ch, $options);
+    $result = curl_exec($ch);
+    $status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    $time = (float)curl_getinfo($ch, CURLINFO_APPCONNECT_TIME);
+    if ($time <= 0) {
+        $time = (float)curl_getinfo($ch, CURLINFO_CONNECT_TIME);
+    }
+    $error = curl_errno($ch);
+    curl_close($ch);
+    if ($result === false || $error !== 0 || $status === 0 || $time <= 0) {
+        return null;
+    }
+    return $time;
+}
+
+function xsw_select_reality_target(array $settings): array
+{
+    $fallbackHost = strtolower(trim((string)($settings['reality_sni'] ?? 'www.cloudflare.com')));
+    if (filter_var($fallbackHost, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) {
+        $fallbackHost = 'www.cloudflare.com';
+    }
+    if (empty($settings['reality_auto_target'])) {
+        return ['sni' => $fallbackHost, 'dest' => $fallbackHost . ':443', 'latency_ms' => null];
+    }
+
+    $scores = [];
+    foreach (xsw_reality_candidate_hosts($settings) as $host) {
+        $score = xsw_probe_reality_candidate($host);
+        if ($score !== null) {
+            $scores[$host] = $score;
+        }
+    }
+    if (!$scores) {
+        return ['sni' => $fallbackHost, 'dest' => $fallbackHost . ':443', 'latency_ms' => null];
+    }
+    asort($scores, SORT_NUMERIC);
+    $host = (string)array_key_first($scores);
+    return [
+        'sni' => $host,
+        'dest' => $host . ':443',
+        'latency_ms' => (int)round((float)$scores[$host] * 1000),
+    ];
 }
 
 function xsw_client_email(string $prefix, string $identity, int $port): string
@@ -1381,6 +1473,18 @@ function xsw_prepare_reality_entries(array &$state): void
     }
 }
 
+function xsw_sniffing_settings(): array
+{
+    return [
+        'enabled' => true,
+        'destOverride' => ['http', 'tls', 'quic'],
+        'metadataOnly' => false,
+        'routeOnly' => true,
+        'ipsExcluded' => [],
+        'domainsExcluded' => [],
+    ];
+}
+
 function xsw_vless_reality_inbound(array $entry): array
 {
     return [
@@ -1395,7 +1499,7 @@ function xsw_vless_reality_inbound(array $entry): array
             'clients' => [[
                 'id' => $entry['uuid'],
                 'email' => xsw_client_email('xsw-entry', (string)$entry['line_id'], (int)$entry['port']),
-                'flow' => '',
+                'flow' => 'xtls-rprx-vision',
                 'enable' => true,
             ]],
             'decryption' => 'none',
@@ -1408,19 +1512,24 @@ function xsw_vless_reality_inbound(array $entry): array
             'realitySettings' => [
                 'show' => false,
                 'xver' => 0,
-                'dest' => $entry['dest'],
+                'target' => $entry['dest'],
                 'serverNames' => [$entry['sni']],
                 'privateKey' => $entry['private_key'],
                 'minClientVer' => '',
                 'maxClientVer' => '',
-                'maxTimeDiff' => 0,
+                'maxTimediff' => 0,
                 'shortIds' => [$entry['short_id']],
+                'mldsa65Seed' => '',
+                'settings' => [
+                    'publicKey' => (string)($entry['public_key'] ?? ''),
+                    'fingerprint' => (string)($entry['fingerprint'] ?? 'chrome'),
+                    'serverName' => '',
+                    'spiderX' => (string)($entry['spider_x'] ?? '/'),
+                    'mldsa65Verify' => '',
+                ],
             ],
         ],
-        'sniffing' => [
-            'enabled' => true,
-            'destOverride' => ['http', 'tls', 'quic'],
-        ],
+        'sniffing' => xsw_sniffing_settings(),
     ];
 }
 
@@ -1453,10 +1562,7 @@ function xsw_vmess_ws_inbound(int $port, string $uuid, string $remark, string $w
                 'headers' => (object)[],
             ],
         ],
-        'sniffing' => [
-            'enabled' => true,
-            'destOverride' => ['http', 'tls', 'quic'],
-        ],
+        'sniffing' => xsw_sniffing_settings(),
     ];
 }
 
@@ -1484,10 +1590,7 @@ function xsw_socks5_inbound(array $entry): array
             'security' => 'none',
             'tcpSettings' => ['header' => ['type' => 'none']],
         ],
-        'sniffing' => [
-            'enabled' => true,
-            'destOverride' => ['http', 'tls', 'quic'],
-        ],
+        'sniffing' => xsw_sniffing_settings(),
     ];
 }
 
@@ -1700,6 +1803,11 @@ function xsw_restart_xray(array $server): void
     xsw_api($server, 'POST', '/panel/api/server/restartXrayService', null, false, 45);
 }
 
+function xsw_restart_panel(array $server): void
+{
+    xsw_api($server, 'POST', '/panel/api/setting/restartPanel', null, false, 45);
+}
+
 function xsw_strip_managed_rules(array $rules, array $managedInboundTags): array
 {
     $keep = [];
@@ -1879,6 +1987,10 @@ function xsw_deploy(array &$state): array
         xsw_restart_xray($state['servers'][$code]);
         $results[] = ['step' => 'restart xray', 'server' => $code, 'result' => 'ok'];
     }
+    foreach (array_keys($serverCodes) as $code) {
+        xsw_restart_panel($state['servers'][$code]);
+        $results[] = ['step' => 'restart panel', 'server' => $code, 'result' => 'ok'];
+    }
     $state['last_results']['deploy'] = ['at' => time(), 'results' => $results];
     xsw_save_state($state);
     xsw_log('info', '发布完成', ['results' => $results]);
@@ -1920,7 +2032,7 @@ function xsw_create_standalone_and_deploy(array &$state, string $name, string $s
     ];
     $entry['remark'] = xsw_new_standalone_remark($entry);
     if ($protocol === 'socks5') {
-        $entry['username'] = 'jd_' . strtolower($id);
+        $entry['username'] = 'xui_' . strtolower($id);
         $entry['password'] = xsw_random_hex(8);
         $payload = xsw_socks5_inbound($entry);
         $stepName = 'standalone socks5 inbound';
@@ -1931,8 +2043,10 @@ function xsw_create_standalone_and_deploy(array &$state, string $name, string $s
         $entry['private_key'] = $keys['private_key'];
         $entry['public_key'] = $keys['public_key'];
         $entry['short_id'] = xsw_random_hex(4);
-        $entry['sni'] = (string)($settings['reality_sni'] ?? 'www.cloudflare.com');
-        $entry['dest'] = (string)($settings['reality_dest'] ?? 'www.cloudflare.com:443');
+        $target = xsw_select_reality_target($settings);
+        $entry['sni'] = $target['sni'];
+        $entry['dest'] = $target['dest'];
+        $entry['target_latency_ms'] = $target['latency_ms'];
         $entry['fingerprint'] = (string)($settings['reality_fingerprint'] ?? 'chrome');
         $entry['spider_x'] = (string)($settings['reality_spider_x'] ?? '/');
         $payload = xsw_vless_reality_inbound([
@@ -1958,9 +2072,11 @@ function xsw_create_standalone_and_deploy(array &$state, string $name, string $s
     $state['standalone']['entries'][] = $entry;
     xsw_save_state($state);
     xsw_restart_xray($server);
+    xsw_restart_panel($server);
     $results = [
         ['step' => $stepName, 'server' => $serverCode, 'entry' => $id, 'result' => $ensureResult, 'inbound_tag' => $entry['inbound_tag']],
         ['step' => 'restart xray', 'server' => $serverCode, 'result' => 'ok'],
+        ['step' => 'restart panel', 'server' => $serverCode, 'result' => 'ok'],
     ];
     $state['last_results']['standalone'] = ['at' => time(), 'entry' => $id, 'results' => $results];
     xsw_save_state($state);
@@ -2041,6 +2157,13 @@ function xsw_delete_standalone_and_cleanup(array &$state, string $entryId): arra
     } catch (Throwable $e) {
         $results[] = ['step' => 'restart xray', 'server' => $serverCode, 'error' => $e->getMessage(), 'local_state' => 'removed'];
         xsw_log('error', '单节点下线后重启失败，已释放本地占用：' . $e->getMessage(), ['entry' => $entryId, 'server' => $serverCode]);
+    }
+    try {
+        xsw_restart_panel($server);
+        $results[] = ['step' => 'restart panel', 'server' => $serverCode, 'result' => 'ok'];
+    } catch (Throwable $e) {
+        $results[] = ['step' => 'restart panel', 'server' => $serverCode, 'error' => $e->getMessage(), 'local_state' => 'removed'];
+        xsw_log('error', '单节点下线后面板重启失败，已释放本地占用：' . $e->getMessage(), ['entry' => $entryId, 'server' => $serverCode]);
     }
     $state['last_results']['standalone_delete'] = ['at' => time(), 'entry' => $entryId, 'results' => $results];
     xsw_save_state($state);
@@ -2949,7 +3072,7 @@ chmod 700 "$SCRIPT"
 if [ "$PERSIST" = "1" ] && command -v systemctl >/dev/null 2>&1; then
   cat > "$SERVICE" <<EOF
 [Unit]
-Description=JD managed firewall rules
+Description=3x-ui Network Panel managed firewall rules
 After=network-online.target
 Wants=network-online.target
 
@@ -2994,7 +3117,7 @@ BASH;
     $state['firewall']['policy'] = $policyState;
     $results = [
         ['step' => 'ssh firewall', 'server' => $host, 'result' => 'ok'],
-        ['step' => $mode === 'clear' ? 'clear JD firewall' : 'apply JD firewall', 'server' => $host, 'result' => 'ok'],
+        ['step' => $mode === 'clear' ? 'clear managed firewall' : 'apply managed firewall', 'server' => $host, 'result' => 'ok'],
     ];
     $state['last_results']['firewall'] = ['at' => time(), 'host' => $host, 'mode' => $mode, 'payload' => $policyState, 'results' => $results];
     if ($sessionId !== '') {
@@ -3010,7 +3133,7 @@ BASH;
             $state['firewall']['sessions'][$sessionId]['policy'] = $policyState;
             $state['firewall']['sessions'][$sessionId]['last_apply_at'] = time();
             $state['firewall']['sessions'][$sessionId]['last_used_at'] = time();
-            $state['firewall']['sessions'][$sessionId]['last_status'] = $mode === 'clear' ? '已清除 JD 策略' : '策略已应用';
+            $state['firewall']['sessions'][$sessionId]['last_status'] = $mode === 'clear' ? '已清除托管策略' : '策略已应用';
         }
     }
     xsw_save_state($state);
@@ -3282,6 +3405,12 @@ function xsw_delete_line_and_cleanup(array &$state, string $lineId): array
             $results[] = ['step' => 'restart xray', 'server' => $code, 'result' => 'ok'];
         }
     }
+    foreach (array_keys($affectedServers) as $code) {
+        if (isset($state['servers'][$code])) {
+            xsw_restart_panel($state['servers'][$code]);
+            $results[] = ['step' => 'restart panel', 'server' => $code, 'result' => 'ok'];
+        }
+    }
 
     $state['last_results']['delete'] = ['at' => time(), 'line' => $lineId, 'results' => $results];
     xsw_save_state($state);
@@ -3323,6 +3452,8 @@ function xsw_purge_all_managed(array &$state): array
             $results[] = ['step' => 'clean xray template', 'result' => xsw_clean_xray_managed_for_server($state, (string)$code, $managedInboundTags)];
             xsw_restart_xray($server);
             $results[] = ['step' => 'restart xray', 'server' => $code, 'result' => 'ok'];
+            xsw_restart_panel($server);
+            $results[] = ['step' => 'restart panel', 'server' => $code, 'result' => 'ok'];
         } catch (Throwable $e) {
             $results[] = ['step' => 'purge server', 'server' => $code, 'error' => $e->getMessage()];
             xsw_log('error', '清理资源失败：' . $e->getMessage(), ['server' => $code]);
@@ -3348,7 +3479,7 @@ function xsw_purge_all_managed(array &$state): array
     }
     $state['last_results']['purge'] = ['at' => time(), 'results' => $results];
     xsw_save_state($state);
-    xsw_log('info', '清空 JD 托管节点', ['results' => $results]);
+    xsw_log('info', '清空托管节点', ['results' => $results]);
     return $results;
 }
 
@@ -3608,6 +3739,7 @@ function xsw_entry_links(array $state): array
         $params = [
             'encryption' => 'none',
             'security' => 'reality',
+            'flow' => 'xtls-rprx-vision',
             'sni' => $entry['sni'],
             'fp' => $entry['fingerprint'],
             'pbk' => $entry['public_key'],
@@ -3617,7 +3749,7 @@ function xsw_entry_links(array $state): array
             'spx' => $entry['spider_x'],
         ];
         $query = http_build_query($params, '', '&', PHP_QUERY_RFC3986);
-        $name = rawurlencode('JD ' . $entry['line_name']);
+        $name = rawurlencode((string)$entry['line_name']);
         $links[$entry['line_id']] = [
             'name' => $entry['line_name'],
             'server' => $entry['server'],
@@ -3657,6 +3789,7 @@ function xsw_standalone_client_infos(array $state): array
             $params = [
                 'encryption' => 'none',
                 'security' => 'reality',
+                'flow' => 'xtls-rprx-vision',
                 'sni' => (string)($entry['sni'] ?? 'www.cloudflare.com'),
                 'fp' => (string)($entry['fingerprint'] ?? 'chrome'),
                 'pbk' => (string)$entry['public_key'],
@@ -3666,7 +3799,7 @@ function xsw_standalone_client_infos(array $state): array
                 'spx' => (string)($entry['spider_x'] ?? '/'),
             ];
             $query = http_build_query($params, '', '&', PHP_QUERY_RFC3986);
-            $name = rawurlencode('JD ' . $info['name']);
+            $name = rawurlencode((string)$info['name']);
             $info['url'] = 'vless://' . (string)($entry['uuid'] ?? '') . '@' . $host . ':' . (int)$entry['port'] . '?' . $query . '#' . $name;
         }
         $infos[$info['id']] = $info;

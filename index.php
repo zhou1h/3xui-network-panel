@@ -120,7 +120,7 @@ function xsw_firewall_status_meta(string $status, bool $enabled): array
         '等待应用' => ['等待应用', ''],
         '等待清除' => ['等待清除', ''],
         '策略已应用' => ['已生效', 'status-ok'],
-        '已清除 JD 策略' => ['已清除', ''],
+        '已清除托管策略', '已清除 JD 策略' => ['已清除', ''],
         default => [$enabled ? '正常' : '停用', $enabled ? 'status-ok' : ''],
     };
 }
@@ -1168,10 +1168,10 @@ try {
               <textarea name="xui_import_text" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" data-sensitive-empty="1" style="min-height:140px" placeholder="德国新1&#10;Username: ...&#10;Access URL: https://1.2.3.4:123/path&#10;API Token: ..."></textarea>
               <label style="display:flex; gap:8px; align-items:center; color:var(--muted); font-size:13px; margin-top:8px">
                 <input type="checkbox" name="purge_before_import" value="1" style="width:16px; height:16px">
-                导入前清空现有 JD 托管节点
+                导入前清空现有托管节点
               </label>
               <div class="actions" style="margin:10px 0 16px">
-                <button type="submit" name="action" value="import_3xui_blocks" data-confirm="会新增或更新资源；如果勾选清空，会先实际删除现有 JD 托管节点。继续？">导入新增/更新</button>
+                <button type="submit" name="action" value="import_3xui_blocks" data-confirm="会新增或更新资源；如果勾选清空，会先实际删除现有托管节点。继续？">导入新增/更新</button>
               </div>
             </form>
           </div>
@@ -1457,7 +1457,7 @@ try {
             </div>
             <div class="actions" style="margin-top:12px">
               <button class="green" type="submit" name="action" value="apply_firewall" data-preserve-scroll="1" onclick="this.form.firewall_mode.value='apply'" data-confirm="会应用当前安全组规则到这台服务器。继续？">应用规则</button>
-              <button class="danger" type="submit" name="action" value="apply_firewall" data-preserve-scroll="1" onclick="this.form.firewall_mode.value='clear'" data-confirm="会清除这台服务器的 JD 防火墙规则。继续？">清空规则</button>
+              <button class="danger" type="submit" name="action" value="apply_firewall" data-preserve-scroll="1" onclick="this.form.firewall_mode.value='clear'" data-confirm="会清除这台服务器的托管防火墙规则。继续？">清空规则</button>
             </div>
           </form>
         </section>

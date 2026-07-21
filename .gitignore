@@ -1,0 +1,29 @@
+# Runtime data and secrets
+/data/*
+!/data/.gitkeep
+!/data/index.php
+
+# Composer dependencies are restored from composer.lock
+/vendor/
+/composer.phar
+
+# Local configuration and databases
+/.env
+/.env.*
+!/.env.example
+*.local.php
+*.sqlite
+*.sqlite3
+*.db
+*.log
+
+# Test/build output
+/coverage/
+/.phpunit.cache/
+/.phpunit.result.cache
+
+# Editor and OS files
+/.idea/
+/.vscode/
+.DS_Store
+Thumbs.db
