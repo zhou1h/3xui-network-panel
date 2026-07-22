@@ -231,7 +231,7 @@ fi
 # Code is readable by the web server; runtime state and credentials stay private.
 find "$APP_DIR" -path "$APP_DIR/.git" -prune -o -path "$DATA_DIR" -prune -o -type d -exec chmod 0755 {} +
 find "$APP_DIR" -path "$APP_DIR/.git" -prune -o -path "$DATA_DIR" -prune -o -type f -exec chmod 0644 {} +
-chmod 0755 "$APP_DIR/install.sh" "$APP_DIR/update.sh" "$APP_DIR/uninstall.sh"
+chmod 0755 "$APP_DIR/deploy.sh" "$APP_DIR/install.sh" "$APP_DIR/update.sh" "$APP_DIR/uninstall.sh"
 chown -R "$WEB_USER:$WEB_GROUP" "$DATA_DIR"
 find "$DATA_DIR" -type d -exec chmod 0700 {} +
 find "$DATA_DIR" -type f -exec chmod 0600 {} +
