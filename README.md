@@ -18,7 +18,6 @@
 - 节点/客户端配置写入后自动重启 Xray，再重启 3x-ui 面板
 - 远程安装 3x-ui、防火墙、安全组和任务中心
 - 审计日志、定时切换和后台任务队列
-- 无固定默认密码；首次安装生成高强度随机密码
 
 ## 架构
 
@@ -37,7 +36,7 @@ flowchart LR
     H -->|Optional relay| I
 ```
 
-面板服务器通过 3x-ui API 管理入站和 Xray 配置；只有远程安装、防火墙等明确任务才使用 SSH。`data/` 保存运行状态和凭据，已从 Git 仓库排除。
+面板服务器通过 3x-ui API 管理入站和 Xray 配置；只有远程安装、防火墙等明确任务才使用 SSH。
 
 ## 支持系统
 
@@ -132,7 +131,7 @@ cd /opt/control-plane/app
 bash update.sh
 ```
 
-`update.sh` 使用 `git pull --ff-only` 获取正常提交，再调用统一安装器更新依赖、权限和 cron。`data/` 与 `vendor/` 不参与提交，因此更新不会覆盖正式节点、任务、令牌或管理密码。如果存在未提交的本地源码修改，脚本会停止，避免覆盖。
+`update.sh` 使用 `git pull --ff-only` 获取正常提交，再调用统一安装器更新依赖、权限和 cron。如果存在未提交的本地源码修改，脚本会停止，避免覆盖。
 
 开发者发布更新的标准流程：
 
@@ -142,8 +141,6 @@ git add -A
 git commit -m "Describe the update"
 git push origin main
 ```
-
-不要在正式运行目录中执行 `git add -f data/`，也不要把 `.gitignore` 排除的配置或运行数据强制提交。
 
 ## Reality 默认行为
 
@@ -217,14 +214,6 @@ sudo bash uninstall.sh --purge-data
 ```
 
 卸载脚本不会删除系统共享的 PHP、SQLite、Composer、SSH 或 sudo，也不会自动删除源码目录。确认备份后可自行删除项目目录。
-
-## 安全说明
-
-- `data/`、`vendor/`、日志、SQLite 文件和本地配置均由 `.gitignore` 排除。
-- 安装器不会使用 `123456` 或其他固定默认密码。
-- `app_secret` 未被业务使用，升级时会从现有配置移除。
-- 正式环境应使用 HTTPS，并通过防火墙、VPN、Cloudflare Access 或 Web 服务器白名单限制管理入口。
-- API Token、SSH 密码/密钥和导出的客户端链接都属于敏感信息，不应提交到公开仓库或截图公开。
 
 ## GitHub Topics
 

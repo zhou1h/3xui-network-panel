@@ -17,7 +17,6 @@ A visual multi-server orchestration panel for 3x-ui and Xray. It manages server 
 - Sniffing for HTTP, TLS, and QUIC with route-only enabled and metadata-only disabled
 - Automatic Xray restart followed by a 3x-ui panel restart after node/client changes
 - Remote 3x-ui installation, firewall policy management, audit logs, scheduling, and job queue
-- No fixed default password; a strong random password is created on first install
 
 ## Architecture
 
@@ -36,7 +35,7 @@ flowchart LR
     H -->|Optional relay| I
 ```
 
-The panel uses the 3x-ui API for inbound and Xray configuration. SSH is used only for explicit installation and firewall tasks. Runtime state and credentials are stored under `data/`, which is excluded from Git.
+The panel uses the 3x-ui API for inbound and Xray configuration. SSH is used only for explicit installation and firewall tasks.
 
 ## Supported systems
 
@@ -125,7 +124,7 @@ cd /opt/control-plane/app
 bash update.sh
 ```
 
-`update.sh` runs `git pull --ff-only` and then the idempotent installer. Runtime data, credentials, and `vendor/` are ignored by Git and are not overwritten. The update stops if local source changes are present.
+`update.sh` runs `git pull --ff-only` and then the idempotent installer. The update stops if local source changes are present.
 
 Standard maintainer workflow:
 
@@ -135,8 +134,6 @@ git add -A
 git commit -m "Describe the update"
 git push origin main
 ```
-
-Never force-add ignored runtime files such as `data/config.php`, state, logs, or databases.
 
 ## Reality defaults
 
@@ -193,13 +190,5 @@ sudo bash uninstall.sh --purge-data
 ```
 
 Shared system packages and the source directory are intentionally preserved. Back up what you need, then remove the source directory manually.
-
-## Security
-
-- `.gitignore` excludes runtime data, dependencies, logs, databases, and local configuration.
-- No fixed or predictable default password is used.
-- The unused `app_secret` setting is removed during upgrade.
-- Put the administrative UI behind HTTPS and an IP allowlist, VPN, firewall, or access gateway.
-- Treat API tokens, SSH credentials, and exported client links as secrets.
 
 Recommended GitHub Topics: `3x-ui`, `x-ui`, `xray`, `reality`, `multi-server`, `network-panel`.
