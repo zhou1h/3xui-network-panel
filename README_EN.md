@@ -8,12 +8,12 @@ A visual multi-server orchestration panel for 3x-ui and Xray. It manages server 
 
 ## Features
 
-- Multi-server inventory and connectivity checks
+- Multi-server inventory, connectivity checks, and inbound/client/SOCKS5 counts
 - VLESS + Reality + RAW endpoints (`tcp` in Xray configuration)
 - `xtls-rprx-vision` on both server clients and generated client links
 - SOCKS5 standalone endpoints and QR-code sharing
 - Multi-hop route orchestration and managed Xray templates
-- Automatic TLS probing of Reality candidates and selection of the fastest available target
+- Node-local target selection through each 3x-ui server's built-in Reality scanner
 - Sniffing for HTTP, TLS, and QUIC with route-only enabled and metadata-only disabled
 - Automatic Xray restart followed by a 3x-ui panel restart after node/client changes
 - Remote 3x-ui installation, firewall policy management, audit logs, scheduling, and job queue
@@ -144,10 +144,11 @@ Never force-add ignored runtime files such as `data/config.php`, state, logs, or
 - Security: Reality
 - Flow: `xtls-rprx-vision`
 - Sniffing: enabled for HTTP/TLS/QUIC; metadata-only off; route-only on
-- Target: probe configured TLS candidates when a Reality endpoint is created, choose the fastest successful result, and use the configured fallback if all probes fail
+- Target: when a standalone Reality endpoint is created, call that node's 3x-ui Reality scan API, require TLS 1.3, HTTP/2, X25519, and a valid certificate, then select by node-measured latency; use compatibility candidates when an older 3x-ui release has no scanner
+- Maintenance: every standalone VLESS endpoint supports node-local rescan, switching to the next scanned candidate, or manual SNI/Target configuration without rotating the UUID, Reality keys, or Short ID
 - Restart: after all inbound/client/routing changes, restart Xray and then restart the 3x-ui panel
 
-Target latency is measured from the server hosting this management panel, not from every client location. Candidates must provide reliable TLS 1.3 connectivity.
+Target latency is measured by the server hosting that inbound, so different nodes may select different targets. Client-to-node performance still needs a separate client test. Resource counts are refreshed by full or per-node health checks.
 
 ## Troubleshooting
 
@@ -165,7 +166,9 @@ Reality cannot use WebSocket or mKCP. Recreate the inbound as RAW. In Xray JSON 
 
 ### Reality connection times out
 
-Confirm that the client supports `xtls-rprx-vision`, the URL contains `flow=xtls-rprx-vision`, SNI/public key/Short ID/port match the server, and both cloud and host firewalls allow the port.
+Run **Node scan and select** for the standalone endpoint and re-import the updated URL. Then confirm that the client supports `xtls-rprx-vision`, the URL contains `flow=xtls-rprx-vision`, SNI/public key/Short ID/port match the server, and both cloud and host firewalls allow the port.
+
+Node-local selection requires `/panel/api/server/scanRealityTargets` on the target 3x-ui instance. Upgrade 3x-ui if this API is unavailable; presets and manual SNI/Target remain available as a fallback.
 
 ### Jobs remain pending
 

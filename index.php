@@ -34,6 +34,7 @@ function xsw_job_type_label(string $type): string
         'update_line' => '拓扑变更',
         'delete_line' => '链路下线',
         'create_standalone' => '单节点开通',
+        'update_standalone_reality' => 'Reality 目标维护',
         'delete_standalone' => '单节点下线',
         'install_3xui' => '面板安装',
         'verify_firewall_ssh' => 'SSH 校验',
@@ -71,6 +72,11 @@ function xsw_job_payload_summary(array $job): string
         'update_line' => (string)($payload['line_id'] ?? '') . ' · ' . (string)($payload['path'] ?? '') . (!empty($payload['keep_entry']) ? ' · 保持入口' : ''),
         'delete_line' => '下线 ' . (string)($payload['line_id'] ?? ''),
         'create_standalone' => trim((string)($payload['name'] ?? '单节点')) . ' · ' . (string)($payload['server'] ?? '') . ' · ' . ((string)($payload['protocol'] ?? 'vless') === 'socks5' ? 'SOCKS5' : 'VLESS Reality') . ' · ' . (string)($payload['port'] ?? ''),
+        'update_standalone_reality' => (string)($payload['entry_id'] ?? '') . ' · ' . match ((string)($payload['mode'] ?? 'manual')) {
+            'scan' => '节点扫描优选',
+            'next' => '切换下一个节点扫描目标',
+            default => (string)($payload['preset_id'] ?? '') !== '' ? '应用预设 ' . (string)$payload['preset_id'] : (string)($payload['sni'] ?? '') . ' → ' . (string)($payload['dest'] ?? ''),
+        },
         'delete_standalone' => '下线 ' . (string)($payload['entry_id'] ?? ''),
         'install_3xui' => trim((string)($payload['name'] ?? '新面板')) . ' · ' . (string)($payload['host'] ?? '') . ':' . (string)($payload['ssh_port'] ?? '22') . ' · ' . (string)($payload['ssh_user'] ?? 'root'),
         'verify_firewall_ssh' => '校验 ' . (string)($payload['host'] ?? '') . ':' . (string)($payload['ssh_port'] ?? '22') . ' · ' . (string)($payload['ssh_user'] ?? 'root'),
@@ -188,6 +194,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'delete_line' => 'lines',
         'schedule_delete_line' => 'lines',
         'create_standalone' => 'singles',
+        'update_standalone_reality' => 'singles',
         'delete_standalone' => 'singles',
         'install_3xui' => 'installer',
         'mark_install_copied' => 'installer',
@@ -393,6 +400,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             xsw_kick_worker();
             $redirectPage = 'singles';
             xsw_flash('ok', '已提交单节点开通任务：' . $job['id']);
+        } elseif ($action === 'update_standalone_reality') {
+            $entryId = preg_replace('/[^A-Za-z0-9_-]/', '', (string)($_POST['entry_id'] ?? ''));
+            $entry = null;
+            foreach (($state['standalone']['entries'] ?? []) as $candidate) {
+                if ((string)($candidate['id'] ?? '') === $entryId) {
+                    $entry = $candidate;
+                    break;
+                }
+            }
+            if (!$entry || (string)($entry['protocol'] ?? '') !== 'vless') {
+                throw new RuntimeException('找不到可维护的 VLESS Reality 单节点');
+            }
+            $mode = (string)($_POST['reality_mode'] ?? 'manual');
+            $mode = in_array($mode, ['scan', 'next', 'manual'], true) ? $mode : 'manual';
+            $presetId = preg_replace('/[^A-Za-z0-9_-]/', '', (string)($_POST['reality_profile'] ?? ''));
+            $sni = trim((string)($_POST['reality_sni'] ?? ''));
+            $dest = trim((string)($_POST['reality_dest'] ?? ''));
+            $spiderX = xsw_normalize_reality_spider_x((string)($_POST['reality_spider_x'] ?? '/'));
+            if ($mode === 'manual' && $presetId !== '' && xsw_reality_target_preset($state['settings'] ?? [], $presetId) === null) {
+                throw new RuntimeException('选择的 Reality 预设不存在');
+            }
+            if ($mode === 'manual' && $presetId === '') {
+                $sni = xsw_validate_reality_hostname($sni, 'SNI');
+                $dest = xsw_normalize_reality_destination($dest);
+            }
+            $job = xsw_enqueue_job($state, 'update_standalone_reality', [
+                'entry_id' => $entryId,
+                'mode' => $mode,
+                'preset_id' => $presetId,
+                'sni' => $sni,
+                'dest' => $dest,
+                'spider_x' => $spiderX,
+            ]);
+            xsw_kick_worker();
+            $redirectPage = 'singles';
+            xsw_flash('ok', '已提交 Reality 目标维护任务：' . $job['id']);
         } elseif ($action === 'delete_standalone') {
             $job = xsw_enqueue_job($state, 'delete_standalone', [
                 'entry_id' => (string)($_POST['entry_id'] ?? ''),
@@ -613,6 +656,7 @@ xsw_ensure_firewall_state($state);
 $entryLinks = xsw_entry_links($state);
 $standaloneEntries = $state['standalone']['entries'] ?? [];
 $standaloneInfos = xsw_standalone_client_infos($state);
+$realityTargetPresets = xsw_reality_target_presets($state['settings'] ?? []);
 $nextStandalonePort = xsw_next_standalone_port($state);
 $linePaths = [];
 foreach (($state['lines'] ?? []) as $line) {
@@ -766,17 +810,17 @@ try {
   <title>JD</title>
   <style>
     :root {
-      --bg:#f4f6fa; --ink:#172033; --muted:#6d7788; --line:#dfe6ef; --panel:#fff;
-      --primary:#2563eb; --primary-dark:#1849a9; --primary-soft:#eef5ff;
+      --bg:#f6f6f3; --ink:#171b22; --muted:#70757d; --line:#dedfda; --panel:#fff;
+      --primary:#20242b; --primary-dark:#0f1217; --primary-soft:#f0f1ef;
       --green:#18a058; --green-dark:#0f7a3d; --green-soft:#effaf3;
       --red:#d92d20; --red-soft:#fff2f0;
       --amber:#f79009; --amber-soft:#fff7ed; --cyan:#0e7490; --cyan-soft:#ecfeff;
-      --soft:#f3f6fa; --table-head:#f8fafc; --shadow:0 1px 2px rgba(24,36,56,.05),0 8px 24px rgba(24,36,56,.04);
+      --soft:#f2f2ef; --table-head:#f7f7f4; --shadow:0 1px 2px rgba(17,24,39,.04),0 8px 24px rgba(17,24,39,.035);
     }
     * { box-sizing:border-box; }
     html { min-height:100%; -webkit-text-size-adjust:100%; text-size-adjust:100%; }
     body { margin:0; min-height:100vh; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; background:var(--bg); color:var(--ink); letter-spacing:0; }
-    header { position:fixed; left:0; top:0; z-index:12; width:272px; height:78px; display:flex; align-items:center; gap:10px; padding:22px 24px 10px; background:#f7f7f5; border:0; box-shadow:none; }
+    header { position:fixed; left:0; top:0; z-index:12; width:272px; height:78px; display:flex; align-items:center; gap:10px; padding:22px 24px 10px; background:var(--bg); border:0; box-shadow:none; }
     header > div:first-child { display:flex; align-items:center; min-width:0; padding-left:14px; }
     header .pill { display:none; }
     h1 { display:block; font-size:22px; margin:0; letter-spacing:.02em; color:#111827; font-weight:800; line-height:1; }
@@ -784,10 +828,10 @@ try {
     h2 { font-size:16px; margin:0 0 14px; letter-spacing:0; }
     main { width:100%; margin:0; padding:0 0 48px 272px; position:relative; z-index:1; }
     .app-layout { display:block; min-width:0; }
-    .sidebar { position:fixed; top:78px; left:0; bottom:0; width:272px; overflow:auto; overscroll-behavior:contain; z-index:11; display:flex; flex-direction:column; gap:4px; background:#f7f7f5; border:0; border-radius:0; padding:16px 24px 22px; box-shadow:none; }
+    .sidebar { position:fixed; top:78px; left:0; bottom:0; width:272px; overflow:auto; overscroll-behavior:contain; z-index:11; display:flex; flex-direction:column; gap:4px; background:var(--bg); border:0; border-radius:0; padding:16px 24px 22px; box-shadow:none; }
     .nav-link { display:flex; align-items:center; gap:12px; min-height:42px; padding:0 14px; border-radius:18px; color:#111827; text-decoration:none; font-weight:650; font-size:15px; transition:background .14s ease,color .14s ease; }
-    .nav-link:hover { background:#ededeb; color:#111827; }
-    .nav-link.active { background:#e7e7e4; color:#111827; box-shadow:none; }
+    .nav-link:hover { background:#ecece8; color:#111827; }
+    .nav-link.active { background:#e4e4df; color:#111827; box-shadow:none; }
     .nav-icon { width:19px; height:19px; flex:0 0 19px; color:#111827; }
     .nav-link.active .nav-icon { color:#111827; }
     .sidebar-logout { margin-top:auto; padding-top:18px; }
@@ -795,7 +839,7 @@ try {
     .sidebar-logout button:hover { background:#ededeb; border-color:transparent; }
     .content { min-width:0; width:min(1320px, calc(100vw - 320px)); margin:0 auto; padding:36px 24px 40px; }
     .page-head { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:18px; min-height:38px; }
-    .page-head h2 { font-size:22px; margin:0; color:#0f1f3d; }
+    .page-head h2 { font-size:22px; margin:0; color:var(--ink); }
     .page-panel { display:none; }
     body[data-page="dashboard"] .grid { display:none; }
     body[data-page="servers"] .page-servers,
@@ -818,7 +862,7 @@ try {
     .label { display:block; color:var(--muted); font-size:12px; margin-bottom:7px; }
     .value { display:block; font-size:18px; font-weight:800; overflow-wrap:anywhere; }
     textarea, input, select { width:100%; border:1px solid var(--line); border-radius:6px; background:#fff; color:var(--ink); font:14px/1.45 ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace; padding:9px 11px; transition:border-color .14s ease,box-shadow .14s ease,background .14s ease; }
-    textarea:focus, input:focus, select:focus { outline:none; border-color:#9cc2ff; box-shadow:0 0 0 3px rgba(37,99,235,.10); }
+    textarea:focus, input:focus, select:focus { outline:none; border-color:#9a9f9b; box-shadow:0 0 0 3px rgba(32,36,43,.08); }
     input, select { height:38px; font-family:inherit; }
     textarea { min-height:128px; resize:vertical; }
     .row { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; }
@@ -867,11 +911,11 @@ try {
     .form-grid { display:grid; grid-template-columns:90px 1fr 1.6fr 1.2fr 1fr auto; gap:10px; align-items:end; }
     .server-list { display:grid; gap:10px; margin-top:14px; }
     .server-card { border:1px solid var(--line); border-radius:8px; background:#fff; padding:12px; transition:border-color .14s ease,box-shadow .14s ease; }
-    .server-card:hover { border-color:#cbd6e4; box-shadow:0 8px 24px rgba(24,36,56,.05); }
+    .server-card:hover { border-color:#c7c9c3; box-shadow:0 8px 24px rgba(17,24,39,.045); }
     .server-card-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:10px; }
     .server-title { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
     .health-board { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px; margin:0 0 14px; }
-    .health-metric { border:1px solid var(--line); border-radius:8px; background:linear-gradient(180deg,#fff,#f8fafc); padding:11px 12px; min-width:0; }
+    .health-metric { border:1px solid var(--line); border-radius:8px; background:#fff; padding:11px 12px; min-width:0; }
     .health-metric span { display:block; color:var(--muted); font-size:12px; margin-bottom:6px; }
     .health-metric strong { display:block; font-size:18px; overflow-wrap:anywhere; }
     .health-failures { display:grid; gap:8px; border:1px solid #f3b8b0; background:var(--red-soft); border-radius:8px; padding:10px 12px; margin:-4px 0 14px; color:var(--red); font-size:13px; }
@@ -882,7 +926,16 @@ try {
     .server-fields { display:grid; grid-template-columns:80px 1fr 1.5fr 1.1fr 1fr; gap:10px; align-items:end; }
     .server-fields input, .form-grid input { min-width:0; }
     .server-actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }
-    .muted-box { background:#fbfcfe; border:1px solid var(--line); border-radius:8px; padding:12px; }
+    .muted-box { background:var(--table-head); border:1px solid var(--line); border-radius:8px; padding:12px; }
+    .resource-counts { display:flex; flex-wrap:wrap; gap:8px; margin-top:9px; }
+    .resource-counts span { display:inline-flex; align-items:center; gap:5px; min-height:26px; padding:0 9px; border:1px solid var(--line); border-radius:999px; background:var(--table-head); color:var(--muted); font-size:12px; }
+    .resource-counts b { color:var(--ink); font-size:13px; }
+    .reality-maintenance { margin-top:14px; border:1px solid var(--line); border-radius:8px; background:var(--table-head); overflow:hidden; }
+    .reality-maintenance > summary { display:flex; justify-content:space-between; gap:12px; align-items:center; cursor:pointer; list-style:none; padding:11px 12px; font-weight:800; }
+    .reality-maintenance > summary::-webkit-details-marker { display:none; }
+    .reality-current { color:var(--muted); font:12px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace; text-align:right; overflow-wrap:anywhere; }
+    .reality-maintenance-body { border-top:1px solid var(--line); padding:12px; background:#fff; }
+    .reality-maintenance-footer { display:grid; grid-template-columns:minmax(180px, .6fr) minmax(320px, 1.4fr); gap:12px; align-items:end; margin-top:12px; }
     details.advanced { border:1px dashed var(--line); border-radius:8px; margin-top:14px; background:var(--table-head); }
     details.advanced > summary { cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px; font-weight:800; }
     details.advanced > summary::marker { content:""; }
@@ -974,7 +1027,7 @@ try {
     .fw-manual-footer button { min-width:92px; }
     @media (max-width: 1280px) { .content { width:calc(100vw - 272px); padding-right:18px; padding-left:18px; } .fw-actions { grid-template-columns:auto minmax(320px, 1fr) auto auto; } .fw-search { grid-column:1 / -1; max-width:none; } }
     @media (max-width: 1180px) { .form-grid, .server-fields, .health-board, .fw-manual-grid, .fw-manual-auth { grid-template-columns:1fr 1fr; } .server-actions { justify-content:flex-start; } }
-    @media (max-width: 980px) { input, select, textarea, button, .button { font-size:16px; } header { position:static; width:auto; height:auto; padding:14px 16px; background:#fff; border-bottom:1px solid var(--line); justify-content:space-between; } header .pill { display:inline-flex; } main { padding:16px; } .app-layout, .grid, .page-grid, .row, .row.two, .form-grid, .server-fields, .qr-entry, .fw-actions, .fw-manual-grid, .fw-manual-auth, .standalone-submit-row { grid-template-columns:1fr; } .standalone-submit-row .bottom-link { justify-self:start; } .fw-search { grid-column:auto; } .sidebar { position:static; width:auto; max-height:none; overflow:visible; background:transparent; padding:0; margin-bottom:16px; } .sidebar-logout { margin-top:8px; padding-top:0; } .sidebar-logout button { width:auto; border:1px solid var(--line); border-radius:6px; background:#fff; justify-content:center; min-height:36px; } .content { width:100%; padding:0; grid-column:auto; } .page-lines .server-strip { grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); } }
+    @media (max-width: 980px) { input, select, textarea, button, .button { font-size:16px; } header { position:static; width:auto; height:auto; padding:14px 16px; background:var(--bg); border-bottom:1px solid var(--line); justify-content:space-between; } header .pill { display:inline-flex; } main { padding:16px; } .app-layout, .grid, .page-grid, .row, .row.two, .form-grid, .server-fields, .qr-entry, .fw-actions, .fw-manual-grid, .fw-manual-auth, .standalone-submit-row, .reality-maintenance-footer { grid-template-columns:1fr; } .standalone-submit-row .bottom-link { justify-self:start; } .fw-search { grid-column:auto; } .sidebar { position:static; width:auto; max-height:none; overflow:visible; background:transparent; padding:0; margin-bottom:16px; } .sidebar-logout { margin-top:8px; padding-top:0; } .sidebar-logout button { width:auto; border:1px solid var(--line); border-radius:6px; background:#fff; justify-content:center; min-height:36px; } .content { width:100%; padding:0; grid-column:auto; } .page-lines .server-strip { grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); } .reality-maintenance > summary { align-items:flex-start; flex-direction:column; } .reality-current { text-align:left; } }
   </style>
 </head>
 <body data-page="<?= xsw_h($page) ?>">
@@ -1124,6 +1177,7 @@ try {
                       }
                   }
               }
+              $inventory = is_array($row['inventory'] ?? null) ? $row['inventory'] : null;
               $usage = xsw_server_usage($state, (string)$code);
             ?>
             <form method="post" id="resource-<?= xsw_h((string)$code) ?>" class="server-card" onsubmit="return !event.submitter || !event.submitter.dataset.confirm || confirm(event.submitter.dataset.confirm)">
@@ -1143,6 +1197,13 @@ try {
                     </div>
                   <?php endif; ?>
                   <?php if ($usage): ?><div class="hint">资源占用：<?= xsw_h(implode('、', $usage)) ?></div><?php endif; ?>
+                  <?php if ($inventory): ?>
+                    <div class="resource-counts" aria-label="资源实时数量">
+                      <span><b><?= (int)($inventory['nodes'] ?? 0) ?></b> 节点</span>
+                      <span><b><?= (int)($inventory['clients'] ?? 0) ?></b> 客户端</span>
+                      <span><b><?= (int)($inventory['socks5'] ?? 0) ?></b> SOCKS5</span>
+                    </div>
+                  <?php endif; ?>
                 </div>
                 <div class="server-actions">
                   <button class="primary" type="submit" name="action" value="update_server">保存资源</button>
@@ -1677,6 +1738,38 @@ try {
                     <button type="button" onclick="navigator.clipboard && navigator.clipboard.writeText(this.previousElementSibling.value)">复制入口</button>
                   </div>
                 </div>
+                <details class="reality-maintenance">
+                  <summary>
+                    <span>Reality 目标维护</span>
+                    <span class="reality-current"><?= xsw_h((string)($entry['sni'] ?? '')) ?> → <?= xsw_h((string)($entry['dest'] ?? '')) ?></span>
+                  </summary>
+                  <form method="post" class="reality-maintenance-body" onsubmit="return confirm((event.submitter && event.submitter.dataset.confirm) || '确定更新 Reality 目标？')">
+                    <input type="hidden" name="action" value="update_standalone_reality">
+                    <input type="hidden" name="entry_id" value="<?= xsw_h((string)($entry['id'] ?? '')) ?>">
+                    <div class="row reality-target-row">
+                      <label>
+                        <span class="label">目标预设</span>
+                        <select name="reality_profile">
+                          <option value="">使用下方手动参数</option>
+                          <?php foreach ($realityTargetPresets as $preset): ?>
+                            <option value="<?= xsw_h((string)$preset['id']) ?>"><?= xsw_h((string)$preset['label']) ?> · <?= xsw_h((string)$preset['sni']) ?> → <?= xsw_h((string)$preset['dest']) ?></option>
+                          <?php endforeach; ?>
+                        </select>
+                      </label>
+                      <label><span class="label">客户端 SNI</span><input name="reality_sni" value="<?= xsw_h((string)($entry['sni'] ?? '')) ?>" placeholder="例如 ai.android"></label>
+                      <label><span class="label">服务端 Target</span><input name="reality_dest" value="<?= xsw_h((string)($entry['dest'] ?? '')) ?>" placeholder="例如 dl.google.com:443"></label>
+                    </div>
+                    <div class="reality-maintenance-footer">
+                      <label><span class="label">SpiderX</span><input name="reality_spider_x" value="<?= xsw_h((string)($entry['spider_x'] ?? '/')) ?>" placeholder="/"></label>
+                      <div class="actions">
+                        <button class="primary" type="submit" name="reality_mode" value="scan" data-confirm="将由这台节点调用 3X-UI 扫描器选择当前可用且延迟较低的 Reality 目标，不会更换 UUID、密钥或 Short ID。继续？">节点扫描优选</button>
+                        <button type="submit" name="reality_mode" value="manual" data-confirm="只会更新 Reality 目标并同步客户端链接，不会更换 UUID、密钥或 Short ID。继续？">保存并应用</button>
+                        <button type="submit" name="reality_mode" value="next" data-confirm="会切换到下一个备用目标，不会更换 UUID、密钥或 Short ID。继续？">切换下一个备用</button>
+                      </div>
+                    </div>
+                    <p class="hint">“节点扫描优选”会调用该节点 3X-UI 自带的 Reality 扫描器，并按可用性与节点实测延迟选择目标。更新后会同步二维码和复制链接，再依次重启 Xray、3X-UI 面板；已导入设备的旧链接需要重新导入。</p>
+                  </form>
+                </details>
               <?php else: ?>
                 <p class="hint">任务完成后显示入口信息</p>
               <?php endif; ?>

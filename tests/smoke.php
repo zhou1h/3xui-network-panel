@@ -35,6 +35,35 @@ assert_true(($inbound['sniffing']['destOverride'] ?? []) === ['http', 'tls', 'qu
 assert_true(($inbound['sniffing']['metadataOnly'] ?? true) === false, 'metadata-only must be disabled');
 assert_true(($inbound['sniffing']['routeOnly'] ?? false) === true, 'route-only must be enabled');
 
+$presets = xsw_reality_target_presets(xsw_default_state()['settings']);
+assert_true(($presets[0]['id'] ?? '') === 'google-android', 'stable Reality preset must be first');
+assert_true(($presets[0]['sni'] ?? '') === 'ai.android', 'Google Android SNI is missing');
+assert_true(($presets[0]['dest'] ?? '') === 'dl.google.com:443', 'Google Android target is missing');
+assert_true(xsw_validate_reality_hostname('AI.Android') === 'ai.android', 'SNI normalization failed');
+assert_true(xsw_normalize_reality_destination('DL.Google.com') === 'dl.google.com:443', 'Reality target normalization failed');
+assert_true(xsw_normalize_reality_spider_x('test') === '/test', 'SpiderX normalization failed');
+assert_true(xsw_reality_scan_sni([
+    'target' => 'dl.google.com:443',
+    'serverNames' => ['*.google.com', 'ai.android', 'dl.google.com'],
+]) === 'ai.android', 'node-local scan must skip wildcard SANs and keep a usable SNI');
+
+$standalonePayload = xsw_standalone_vless_payload([
+    'id' => 'single3',
+    'name' => 'Standalone',
+    'uuid' => $entry['uuid'],
+    'private_key' => $entry['private_key'],
+    'public_key' => $entry['public_key'],
+    'short_id' => $entry['short_id'],
+    'sni' => 'ai.android',
+    'dest' => 'dl.google.com:443',
+    'fingerprint' => 'chrome',
+    'spider_x' => '/',
+    'port' => 36000,
+    'remark' => 'Standalone · single3',
+]);
+assert_true(($standalonePayload['settings']['clients'][0]['email'] ?? '') === 'xsw-entry-single3-36000', 'standalone client identity changed');
+assert_true(($standalonePayload['streamSettings']['realitySettings']['target'] ?? '') === 'dl.google.com:443', 'standalone target maintenance payload is wrong');
+
 $state = xsw_default_state();
 $state['servers']['A'] = [
     'code' => 'A',

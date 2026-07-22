@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 date_default_timezone_set('Asia/Shanghai');
 
-const XSW_VERSION = '0.3.6';
+const XSW_VERSION = '0.3.7';
 const XSW_PREFIX = 'xsw_';
 const XSW_LEGACY_PREFIX = 'jd_';
 const XSW_DATA_DIR = __DIR__ . '/data';
@@ -92,8 +92,8 @@ function xsw_default_state(): array
                 'www.amazon.com',
                 'www.mozilla.org',
             ],
-            'reality_sni' => 'www.cloudflare.com',
-            'reality_dest' => 'www.cloudflare.com:443',
+            'reality_sni' => 'ai.android',
+            'reality_dest' => 'dl.google.com:443',
             'reality_fingerprint' => 'chrome',
             'reality_spider_x' => '/',
             'ws_path_prefix' => '/xsw',
@@ -1200,10 +1200,17 @@ function xsw_build_plan(array &$state): array
             $state['managed']['entries'][$lineId]['short_id'] = xsw_random_hex(4);
         }
         if (empty($state['managed']['entries'][$lineId]['sni']) || empty($state['managed']['entries'][$lineId]['dest'])) {
-            $target = xsw_select_reality_target($settings);
+            try {
+                $target = xsw_select_reality_target_for_server($state['servers'][$path[0]], $settings);
+            } catch (Throwable $e) {
+                $target = xsw_select_reality_target($settings);
+                $target['scan_fallback'] = $e->getMessage();
+            }
             $state['managed']['entries'][$lineId]['sni'] = $target['sni'];
             $state['managed']['entries'][$lineId]['dest'] = $target['dest'];
             $state['managed']['entries'][$lineId]['target_latency_ms'] = $target['latency_ms'];
+            $state['managed']['entries'][$lineId]['reality_profile'] = (string)($target['id'] ?? 'compatibility-fallback');
+            $state['managed']['entries'][$lineId]['reality_updated_at'] = time();
         }
         if (empty($state['managed']['entries'][$lineId]['fingerprint'])) {
             $state['managed']['entries'][$lineId]['fingerprint'] = (string)($settings['reality_fingerprint'] ?? 'chrome');
@@ -1346,29 +1353,133 @@ function xsw_select_reality_target(array $settings): array
 {
     $fallbackHost = strtolower(trim((string)($settings['reality_sni'] ?? 'www.cloudflare.com')));
     if (filter_var($fallbackHost, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) {
-        $fallbackHost = 'www.cloudflare.com';
+        $fallbackHost = 'ai.android';
+    }
+    try {
+        $fallbackDest = xsw_normalize_reality_destination((string)($settings['reality_dest'] ?? ($fallbackHost . ':443')));
+    } catch (Throwable $e) {
+        $fallbackDest = $fallbackHost . ':443';
     }
     if (empty($settings['reality_auto_target'])) {
-        return ['sni' => $fallbackHost, 'dest' => $fallbackHost . ':443', 'latency_ms' => null];
+        return ['sni' => $fallbackHost, 'dest' => $fallbackDest, 'latency_ms' => null];
     }
 
-    $scores = [];
-    foreach (xsw_reality_candidate_hosts($settings) as $host) {
-        $score = xsw_probe_reality_candidate($host);
+    // Prefer a predictable, proven profile. The probe runs on the controller,
+    // so it is only a reachability guard and is not presented as node-local latency.
+    foreach (xsw_reality_target_presets($settings) as $preset) {
+        $destHost = explode(':', (string)$preset['dest'], 2)[0];
+        $score = xsw_probe_reality_candidate($destHost);
         if ($score !== null) {
-            $scores[$host] = $score;
+            return [
+                'sni' => (string)$preset['sni'],
+                'dest' => (string)$preset['dest'],
+                'latency_ms' => (int)round($score * 1000),
+            ];
         }
     }
-    if (!$scores) {
-        return ['sni' => $fallbackHost, 'dest' => $fallbackHost . ':443', 'latency_ms' => null];
+    return ['sni' => $fallbackHost, 'dest' => $fallbackDest, 'latency_ms' => null];
+}
+
+function xsw_validate_reality_hostname(string $value, string $label = 'SNI'): string
+{
+    $host = strtolower(rtrim(trim($value), '.'));
+    if ($host === '' || strlen($host) > 253) {
+        throw new RuntimeException($label . ' 不是有效域名');
     }
-    asort($scores, SORT_NUMERIC);
-    $host = (string)array_key_first($scores);
-    return [
-        'sni' => $host,
-        'dest' => $host . ':443',
-        'latency_ms' => (int)round((float)$scores[$host] * 1000),
+    if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
+        throw new RuntimeException($label . ' 必须填写公开域名，不能填写 IP');
+    }
+    if (filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) {
+        throw new RuntimeException($label . ' 不是有效域名');
+    }
+    if (preg_match('/(?:^|\.)(?:localhost|local|internal|invalid)$/', $host) === 1) {
+        throw new RuntimeException($label . ' 不能使用本机或内部域名');
+    }
+    return $host;
+}
+
+function xsw_normalize_reality_destination(string $value): string
+{
+    $value = strtolower(trim($value));
+    if ($value === '' || str_contains($value, '://') || str_contains($value, '/') || str_contains($value, '?') || str_contains($value, '#')) {
+        throw new RuntimeException('Reality 目标格式应为 域名:端口');
+    }
+    if (preg_match('/^([a-z0-9.-]+)(?::([0-9]{1,5}))?$/i', $value, $match) !== 1) {
+        throw new RuntimeException('Reality 目标格式应为 域名:端口');
+    }
+    $host = xsw_validate_reality_hostname((string)$match[1], 'Reality 目标');
+    $port = isset($match[2]) && $match[2] !== '' ? (int)$match[2] : 443;
+    if ($port < 1 || $port > 65535) {
+        throw new RuntimeException('Reality 目标端口不正确');
+    }
+    return $host . ':' . $port;
+}
+
+function xsw_normalize_reality_spider_x(string $value): string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return '/';
+    }
+    if (strlen($value) > 256 || preg_match('/[\x00-\x1F\x7F]/', $value) === 1) {
+        throw new RuntimeException('SpiderX 格式不正确');
+    }
+    if (!str_starts_with($value, '/')) {
+        $value = '/' . $value;
+    }
+    return $value;
+}
+
+function xsw_reality_target_presets(array $settings = []): array
+{
+    $presets = [
+        'google-android' => ['id' => 'google-android', 'label' => 'Google Android', 'sni' => 'ai.android', 'dest' => 'dl.google.com:443'],
+        'mozilla' => ['id' => 'mozilla', 'label' => 'Mozilla', 'sni' => 'www.mozilla.org', 'dest' => 'www.mozilla.org:443'],
+        'cloudflare' => ['id' => 'cloudflare', 'label' => 'Cloudflare', 'sni' => 'www.cloudflare.com', 'dest' => 'www.cloudflare.com:443'],
+        'microsoft' => ['id' => 'microsoft', 'label' => 'Microsoft', 'sni' => 'www.microsoft.com', 'dest' => 'www.microsoft.com:443'],
+        'apple' => ['id' => 'apple', 'label' => 'Apple', 'sni' => 'www.apple.com', 'dest' => 'www.apple.com:443'],
+        'amazon' => ['id' => 'amazon', 'label' => 'Amazon', 'sni' => 'www.amazon.com', 'dest' => 'www.amazon.com:443'],
     ];
+    foreach (xsw_reality_candidate_hosts($settings) as $host) {
+        $id = 'custom-' . substr(hash('sha256', $host), 0, 10);
+        $exists = false;
+        foreach ($presets as $preset) {
+            if (($preset['sni'] ?? '') === $host && ($preset['dest'] ?? '') === $host . ':443') {
+                $exists = true;
+                break;
+            }
+        }
+        if (!$exists) {
+            $presets[$id] = ['id' => $id, 'label' => $host, 'sni' => $host, 'dest' => $host . ':443'];
+        }
+    }
+    return array_values($presets);
+}
+
+function xsw_reality_target_preset(array $settings, string $presetId): ?array
+{
+    foreach (xsw_reality_target_presets($settings) as $preset) {
+        if (hash_equals((string)($preset['id'] ?? ''), $presetId)) {
+            return $preset;
+        }
+    }
+    return null;
+}
+
+function xsw_next_reality_target_preset(array $settings, string $currentSni, string $currentDest): array
+{
+    $presets = xsw_reality_target_presets($settings);
+    if (!$presets) {
+        throw new RuntimeException('没有可用的 Reality 备用目标');
+    }
+    $currentIndex = -1;
+    foreach ($presets as $index => $preset) {
+        if (($preset['sni'] ?? '') === $currentSni && ($preset['dest'] ?? '') === $currentDest) {
+            $currentIndex = (int)$index;
+            break;
+        }
+    }
+    return $presets[($currentIndex + 1) % count($presets)];
 }
 
 function xsw_client_email(string $prefix, string $identity, int $port): string
@@ -1445,7 +1556,117 @@ function xsw_test_server(array $server): array
         'ok' => true,
         'ms' => (int)round((microtime(true) - $started) * 1000),
         'summary' => $res['obj'] ?? $res,
+        'inventory' => xsw_resource_inventory($server),
     ];
+}
+
+function xsw_resource_inventory(array $server): array
+{
+    $list = xsw_api($server, 'GET', '/panel/api/inbounds/list', null, false, 20);
+    $inbounds = is_array($list['obj'] ?? null) ? $list['obj'] : [];
+    $protocols = [];
+    $configuredClients = 0;
+    $socks5 = 0;
+    foreach ($inbounds as $inbound) {
+        if (!is_array($inbound)) {
+            continue;
+        }
+        $protocol = strtolower((string)($inbound['protocol'] ?? 'unknown'));
+        $protocols[$protocol] = (int)($protocols[$protocol] ?? 0) + 1;
+        if (in_array($protocol, ['mixed', 'socks', 'socks5'], true)) {
+            $socks5++;
+        }
+        $settings = xsw_decode_maybe($inbound['settings'] ?? []);
+        if (is_array($settings['clients'] ?? null)) {
+            $configuredClients += count($settings['clients']);
+        }
+    }
+
+    $clientRecords = null;
+    try {
+        $clients = xsw_api($server, 'GET', '/panel/api/clients/list', null, false, 20);
+        if (is_array($clients['obj'] ?? null)) {
+            $clientRecords = count($clients['obj']);
+        }
+    } catch (Throwable $e) {
+        // Older 3x-ui versions do not expose the independent clients API.
+    }
+
+    return [
+        'nodes' => count($inbounds),
+        'clients' => $clientRecords ?? $configuredClients,
+        'configured_clients' => $configuredClients,
+        'socks5' => $socks5,
+        'protocols' => $protocols,
+    ];
+}
+
+function xsw_reality_scan_sni(array $row): string
+{
+    foreach ((array)($row['serverNames'] ?? []) as $candidate) {
+        $candidate = strtolower(trim((string)$candidate));
+        if ($candidate === '' || str_contains($candidate, '*')) {
+            continue;
+        }
+        try {
+            return xsw_validate_reality_hostname($candidate, '扫描结果 SNI');
+        } catch (Throwable $e) {
+            continue;
+        }
+    }
+    $target = xsw_normalize_reality_destination((string)($row['target'] ?? ''));
+    return xsw_validate_reality_hostname(explode(':', $target, 2)[0], '扫描结果 SNI');
+}
+
+function xsw_scan_reality_targets(array $server, string $targets = ''): array
+{
+    $res = xsw_api(
+        $server,
+        'POST',
+        '/panel/api/server/scanRealityTargets',
+        ['targets' => trim($targets)],
+        false,
+        90
+    );
+    $rows = is_array($res['obj'] ?? null) ? $res['obj'] : [];
+    $usable = [];
+    foreach ($rows as $row) {
+        if (!is_array($row) || empty($row['feasible']) || empty($row['tls13']) || empty($row['h2']) || empty($row['x25519']) || empty($row['certValid'])) {
+            continue;
+        }
+        try {
+            $target = xsw_normalize_reality_destination((string)($row['target'] ?? ''));
+            $sni = xsw_reality_scan_sni($row);
+        } catch (Throwable $e) {
+            continue;
+        }
+        $usable[] = [
+            'id' => 'node-scan-' . substr(hash('sha256', $sni . '|' . $target), 0, 10),
+            'label' => '节点扫描 ' . $sni,
+            'sni' => $sni,
+            'dest' => $target,
+            'latency_ms' => max(0, (int)($row['latencyMs'] ?? 0)),
+            'tls_version' => (string)($row['tlsVersion'] ?? ''),
+            'alpn' => (string)($row['alpn'] ?? ''),
+        ];
+    }
+    usort($usable, fn($a, $b) => (int)$a['latency_ms'] <=> (int)$b['latency_ms']);
+    return $usable;
+}
+
+function xsw_select_reality_target_for_server(array $server, array $settings, string $excludeDest = ''): array
+{
+    $targets = xsw_scan_reality_targets($server);
+    foreach ($targets as $target) {
+        if ($excludeDest !== '' && hash_equals((string)$target['dest'], $excludeDest)) {
+            continue;
+        }
+        return $target;
+    }
+    $message = $excludeDest !== ''
+        ? '节点扫描没有找到不同于当前配置的可用 Reality 目标'
+        : '节点扫描没有找到可用的 Reality 目标';
+    throw new RuntimeException($message . '，请升级 3X-UI 或使用手动目标');
 }
 
 function xsw_reality_keypair(array $server): array
@@ -1997,6 +2218,24 @@ function xsw_deploy(array &$state): array
     return $results;
 }
 
+function xsw_standalone_vless_payload(array $entry): array
+{
+    return xsw_vless_reality_inbound([
+        'line_id' => (string)($entry['id'] ?? ''),
+        'line_name' => (string)($entry['name'] ?? $entry['id'] ?? 'Standalone'),
+        'uuid' => (string)($entry['uuid'] ?? ''),
+        'private_key' => (string)($entry['private_key'] ?? ''),
+        'public_key' => (string)($entry['public_key'] ?? ''),
+        'short_id' => (string)($entry['short_id'] ?? ''),
+        'sni' => (string)($entry['sni'] ?? ''),
+        'dest' => (string)($entry['dest'] ?? ''),
+        'fingerprint' => (string)($entry['fingerprint'] ?? 'chrome'),
+        'spider_x' => (string)($entry['spider_x'] ?? '/'),
+        'port' => (int)($entry['port'] ?? 0),
+        'remark' => xsw_standalone_remark($entry),
+    ]);
+}
+
 function xsw_create_standalone_and_deploy(array &$state, string $name, string $serverCode, string $protocol, int $port): array
 {
     xsw_ensure_standalone_state($state);
@@ -2043,26 +2282,21 @@ function xsw_create_standalone_and_deploy(array &$state, string $name, string $s
         $entry['private_key'] = $keys['private_key'];
         $entry['public_key'] = $keys['public_key'];
         $entry['short_id'] = xsw_random_hex(4);
-        $target = xsw_select_reality_target($settings);
+        try {
+            $target = xsw_select_reality_target_for_server($state['servers'][$serverCode], $settings);
+        } catch (Throwable $e) {
+            // Keep standalone creation compatible with older 3X-UI versions.
+            $target = xsw_select_reality_target($settings);
+            $target['scan_fallback'] = $e->getMessage();
+        }
         $entry['sni'] = $target['sni'];
         $entry['dest'] = $target['dest'];
         $entry['target_latency_ms'] = $target['latency_ms'];
+        $entry['reality_profile'] = (string)($target['id'] ?? 'compatibility-fallback');
+        $entry['reality_updated_at'] = time();
         $entry['fingerprint'] = (string)($settings['reality_fingerprint'] ?? 'chrome');
         $entry['spider_x'] = (string)($settings['reality_spider_x'] ?? '/');
-        $payload = xsw_vless_reality_inbound([
-            'line_id' => $id,
-            'line_name' => $entry['name'],
-            'uuid' => $entry['uuid'],
-            'private_key' => $entry['private_key'],
-            'public_key' => $entry['public_key'],
-            'short_id' => $entry['short_id'],
-            'sni' => $entry['sni'],
-            'dest' => $entry['dest'],
-            'fingerprint' => $entry['fingerprint'],
-            'spider_x' => $entry['spider_x'],
-            'port' => $entry['port'],
-            'remark' => xsw_standalone_remark($entry),
-        ]);
+        $payload = xsw_standalone_vless_payload($entry);
         $stepName = 'standalone vless reality inbound';
     }
 
@@ -2082,6 +2316,113 @@ function xsw_create_standalone_and_deploy(array &$state, string $name, string $s
     xsw_save_state($state);
     xsw_log('info', '创建单节点入口', ['entry' => $id, 'server' => $serverCode, 'protocol' => $protocol, 'port' => $port]);
     return ['entry_id' => $id, 'results' => $results];
+}
+
+function xsw_update_standalone_reality_and_deploy(
+    array &$state,
+    string $entryId,
+    string $mode,
+    string $presetId,
+    string $sni,
+    string $dest,
+    string $spiderX
+): array {
+    xsw_ensure_standalone_state($state);
+    $entryIndex = null;
+    foreach (($state['standalone']['entries'] ?? []) as $index => $candidate) {
+        if ((string)($candidate['id'] ?? '') === $entryId) {
+            $entryIndex = (int)$index;
+            break;
+        }
+    }
+    if ($entryIndex === null) {
+        throw new RuntimeException('找不到单节点入口：' . $entryId);
+    }
+    $entry = $state['standalone']['entries'][$entryIndex];
+    if ((string)($entry['protocol'] ?? '') !== 'vless') {
+        throw new RuntimeException('只有 VLESS Reality 单节点支持目标维护');
+    }
+    $serverCode = (string)($entry['server'] ?? '');
+    if ($serverCode === '' || empty($state['servers'][$serverCode])) {
+        throw new RuntimeException('单节点对应的资源不存在：' . $serverCode);
+    }
+    foreach (['uuid', 'private_key', 'public_key', 'short_id'] as $required) {
+        if (trim((string)($entry[$required] ?? '')) === '') {
+            throw new RuntimeException('单节点缺少必要的 Reality 凭据，不能安全更新目标');
+        }
+    }
+
+    $settings = is_array($state['settings'] ?? null) ? $state['settings'] : [];
+    $server = $state['servers'][$serverCode];
+    $mode = in_array($mode, ['scan', 'next', 'manual'], true) ? $mode : 'manual';
+    if ($mode === 'scan') {
+        $target = xsw_select_reality_target_for_server($server, $settings);
+    } elseif ($mode === 'next') {
+        try {
+            $target = xsw_select_reality_target_for_server(
+                $server,
+                $settings,
+                xsw_normalize_reality_destination((string)($entry['dest'] ?? ''))
+            );
+        } catch (Throwable $e) {
+            $target = xsw_next_reality_target_preset(
+                $settings,
+                (string)($entry['sni'] ?? ''),
+                (string)($entry['dest'] ?? '')
+            );
+            $target['scan_fallback'] = $e->getMessage();
+        }
+    } elseif ($presetId !== '') {
+        $target = xsw_reality_target_preset($settings, $presetId);
+        if ($target === null) {
+            throw new RuntimeException('选择的 Reality 预设不存在');
+        }
+    } else {
+        $target = [
+            'id' => 'manual',
+            'label' => '手动配置',
+            'sni' => xsw_validate_reality_hostname($sni, 'SNI'),
+            'dest' => xsw_normalize_reality_destination($dest),
+        ];
+    }
+
+    $updated = $entry;
+    $updated['sni'] = xsw_validate_reality_hostname((string)$target['sni'], 'SNI');
+    $updated['dest'] = xsw_normalize_reality_destination((string)$target['dest']);
+    $updated['spider_x'] = xsw_normalize_reality_spider_x($spiderX !== '' ? $spiderX : (string)($entry['spider_x'] ?? '/'));
+    $updated['fingerprint'] = 'chrome';
+    $updated['target_latency_ms'] = isset($target['latency_ms']) ? max(0, (int)$target['latency_ms']) : null;
+    $updated['reality_profile'] = (string)($target['id'] ?? 'manual');
+    $updated['reality_updated_at'] = time();
+
+    $payload = xsw_standalone_vless_payload($updated);
+    $ensureResult = xsw_ensure_inbound($server, $payload);
+    $state['standalone']['entries'][$entryIndex] = $updated;
+    xsw_save_state($state);
+
+    $results = [
+        ['step' => 'update reality target', 'server' => $serverCode, 'entry' => $entryId, 'result' => $ensureResult, 'sni' => $updated['sni'], 'target' => $updated['dest']],
+    ];
+    xsw_restart_xray($server);
+    $results[] = ['step' => 'restart xray', 'server' => $serverCode, 'result' => 'ok'];
+    xsw_restart_panel($server);
+    $results[] = ['step' => 'restart panel', 'server' => $serverCode, 'result' => 'ok'];
+
+    $state['last_results']['standalone_reality'] = [
+        'at' => time(),
+        'entry' => $entryId,
+        'profile' => (string)($target['label'] ?? $target['id'] ?? 'manual'),
+        'results' => $results,
+    ];
+    xsw_save_state($state);
+    xsw_log('info', '更新单节点 Reality 目标', [
+        'entry' => $entryId,
+        'server' => $serverCode,
+        'profile' => (string)($target['id'] ?? 'manual'),
+        'sni' => $updated['sni'],
+        'target' => $updated['dest'],
+    ]);
+    return ['entry_id' => $entryId, 'results' => $results];
 }
 
 function xsw_delete_standalone_inbound_best_effort(array $server, array $entry, string $serverCode, string $entryId): array
@@ -3639,6 +3980,15 @@ function xsw_run_job(array &$state, array $job): array
         'update_line' => xsw_update_line_and_deploy($state, (string)($payload['line_id'] ?? ''), (string)($payload['name'] ?? ''), (string)($payload['path'] ?? ''), !empty($payload['keep_entry'])),
         'delete_line' => xsw_delete_line_and_cleanup($state, (string)($payload['line_id'] ?? '')),
         'create_standalone' => xsw_create_standalone_and_deploy($state, (string)($payload['name'] ?? ''), (string)($payload['server'] ?? ''), (string)($payload['protocol'] ?? 'vless'), (int)($payload['port'] ?? 0)),
+        'update_standalone_reality' => xsw_update_standalone_reality_and_deploy(
+            $state,
+            (string)($payload['entry_id'] ?? ''),
+            (string)($payload['mode'] ?? 'manual'),
+            (string)($payload['preset_id'] ?? ''),
+            (string)($payload['sni'] ?? ''),
+            (string)($payload['dest'] ?? ''),
+            (string)($payload['spider_x'] ?? '/')
+        ),
         'delete_standalone' => xsw_delete_standalone_and_cleanup($state, (string)($payload['entry_id'] ?? '')),
         'install_3xui' => xsw_install_3xui_and_import($state, is_array($payload) ? $payload : [], xsw_load_job_secret((string)($job['id'] ?? ''))),
         'read_firewall' => xsw_read_firewall_state($state, is_array($payload) ? $payload : [], xsw_load_job_secret((string)($job['id'] ?? ''))),
