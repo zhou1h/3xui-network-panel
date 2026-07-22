@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 date_default_timezone_set('Asia/Shanghai');
 
-const XSW_VERSION = '0.3.9';
+const XSW_VERSION = '0.3.10';
 const XSW_PREFIX = 'xsw_';
 const XSW_LEGACY_PREFIX = 'jd_';
 const XSW_DATA_DIR = __DIR__ . '/data';
@@ -1443,6 +1443,18 @@ function xsw_normalize_reality_spider_x(string $value): string
     return $value;
 }
 
+function xsw_normalize_reality_client_version(string $value): string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return '';
+    }
+    if (strlen($value) > 32 || preg_match('/^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/', $value) !== 1) {
+        throw new RuntimeException('最小客户端版本格式应为 0.0.0 或 26.7.11');
+    }
+    return $value;
+}
+
 function xsw_reality_target_presets(array $settings = []): array
 {
     $presets = [
@@ -1750,7 +1762,7 @@ function xsw_vless_reality_inbound(array $entry): array
                 'target' => $entry['dest'],
                 'serverNames' => [$entry['sni']],
                 'privateKey' => $entry['private_key'],
-                'minClientVer' => '',
+                'minClientVer' => (string)($entry['min_client_ver'] ?? ''),
                 'maxClientVer' => '',
                 'maxTimediff' => 0,
                 'shortIds' => [$entry['short_id']],
@@ -2334,6 +2346,7 @@ function xsw_standalone_vless_payload(array $entry): array
         'dest' => (string)($entry['dest'] ?? ''),
         'fingerprint' => (string)($entry['fingerprint'] ?? 'chrome'),
         'spider_x' => (string)($entry['spider_x'] ?? '/'),
+        'min_client_ver' => (string)($entry['min_client_ver'] ?? ''),
         'port' => (int)($entry['port'] ?? 0),
         'remark' => xsw_standalone_remark($entry),
     ]);
@@ -2399,6 +2412,7 @@ function xsw_create_standalone_and_deploy(array &$state, string $name, string $s
         $entry['reality_updated_at'] = time();
         $entry['fingerprint'] = (string)($settings['reality_fingerprint'] ?? 'chrome');
         $entry['spider_x'] = (string)($settings['reality_spider_x'] ?? '/');
+        $entry['min_client_ver'] = '';
         $payload = xsw_standalone_vless_payload($entry);
         $stepName = 'standalone vless reality inbound';
     }
@@ -2428,7 +2442,8 @@ function xsw_update_standalone_reality_and_deploy(
     string $presetId,
     string $sni,
     string $dest,
-    string $spiderX
+    string $spiderX,
+    string $minClientVer
 ): array {
     xsw_ensure_standalone_state($state);
     $entryIndex = null;
@@ -2500,6 +2515,7 @@ function xsw_update_standalone_reality_and_deploy(
     $updated['sni'] = xsw_validate_reality_hostname((string)$target['sni'], 'SNI');
     $updated['dest'] = xsw_normalize_reality_destination((string)$target['dest']);
     $updated['spider_x'] = xsw_normalize_reality_spider_x($spiderX !== '' ? $spiderX : (string)($entry['spider_x'] ?? '/'));
+    $updated['min_client_ver'] = xsw_normalize_reality_client_version($minClientVer);
     $updated['fingerprint'] = 'chrome';
     $updated['target_latency_ms'] = isset($target['latency_ms']) ? max(0, (int)$target['latency_ms']) : null;
     $updated['reality_profile'] = (string)($target['id'] ?? 'manual');
@@ -2533,6 +2549,7 @@ function xsw_update_standalone_reality_and_deploy(
         'profile' => (string)($target['id'] ?? 'manual'),
         'sni' => $updated['sni'],
         'target' => $updated['dest'],
+        'min_client_ver' => $updated['min_client_ver'],
     ]);
     return ['entry_id' => $entryId, 'results' => $results];
 }
@@ -4099,7 +4116,8 @@ function xsw_run_job(array &$state, array $job): array
             (string)($payload['preset_id'] ?? ''),
             (string)($payload['sni'] ?? ''),
             (string)($payload['dest'] ?? ''),
-            (string)($payload['spider_x'] ?? '/')
+            (string)($payload['spider_x'] ?? '/'),
+            (string)($payload['min_client_ver'] ?? '')
         ),
         'delete_standalone' => xsw_delete_standalone_and_cleanup($state, (string)($payload['entry_id'] ?? '')),
         'install_3xui' => xsw_install_3xui_and_import($state, is_array($payload) ? $payload : [], xsw_load_job_secret((string)($job['id'] ?? ''))),

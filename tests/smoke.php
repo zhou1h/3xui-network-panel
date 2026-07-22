@@ -42,6 +42,8 @@ assert_true(($presets[0]['dest'] ?? '') === 'dl.google.com:443', 'Google Android
 assert_true(xsw_validate_reality_hostname('AI.Android') === 'ai.android', 'SNI normalization failed');
 assert_true(xsw_normalize_reality_destination('DL.Google.com') === 'dl.google.com:443', 'Reality target normalization failed');
 assert_true(xsw_normalize_reality_spider_x('test') === '/test', 'SpiderX normalization failed');
+assert_true(xsw_normalize_reality_client_version('') === '', 'empty minimum client version must remain the default');
+assert_true(xsw_normalize_reality_client_version('0.0.0') === '0.0.0', 'minimum client version normalization failed');
 $compatibilityTarget = xsw_compatibility_reality_target(
     array_replace(xsw_default_state()['settings'], ['reality_auto_target' => false]),
     new RuntimeException('HTTP 404')
@@ -64,11 +66,13 @@ $standalonePayload = xsw_standalone_vless_payload([
     'dest' => 'dl.google.com:443',
     'fingerprint' => 'chrome',
     'spider_x' => '/',
+    'min_client_ver' => '0.0.0',
     'port' => 36000,
     'remark' => 'Standalone · single3',
 ]);
 assert_true(($standalonePayload['settings']['clients'][0]['email'] ?? '') === 'xsw-entry-single3-36000', 'standalone client identity changed');
 assert_true(($standalonePayload['streamSettings']['realitySettings']['target'] ?? '') === 'dl.google.com:443', 'standalone target maintenance payload is wrong');
+assert_true(($standalonePayload['streamSettings']['realitySettings']['minClientVer'] ?? '') === '0.0.0', 'standalone minimum client version is missing');
 
 $orphanFixtureInbounds = [[
     'settings' => json_encode(['clients' => [

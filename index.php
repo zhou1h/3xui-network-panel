@@ -418,6 +418,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $sni = trim((string)($_POST['reality_sni'] ?? ''));
             $dest = trim((string)($_POST['reality_dest'] ?? ''));
             $spiderX = xsw_normalize_reality_spider_x((string)($_POST['reality_spider_x'] ?? '/'));
+            $minClientVer = xsw_normalize_reality_client_version((string)($_POST['reality_min_client_ver'] ?? ''));
             if ($mode === 'manual' && $presetId !== '' && xsw_reality_target_preset($state['settings'] ?? [], $presetId) === null) {
                 throw new RuntimeException('选择的 Reality 预设不存在');
             }
@@ -432,6 +433,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'sni' => $sni,
                 'dest' => $dest,
                 'spider_x' => $spiderX,
+                'min_client_ver' => $minClientVer,
             ]);
             xsw_kick_worker();
             $redirectPage = 'singles';
@@ -935,7 +937,7 @@ try {
     .reality-maintenance > summary::-webkit-details-marker { display:none; }
     .reality-current { color:var(--muted); font:12px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace; text-align:right; overflow-wrap:anywhere; }
     .reality-maintenance-body { border-top:1px solid var(--line); padding:12px; background:#fff; }
-    .reality-maintenance-footer { display:grid; grid-template-columns:minmax(180px, .6fr) minmax(320px, 1.4fr); gap:12px; align-items:end; margin-top:12px; }
+    .reality-maintenance-footer { display:grid; grid-template-columns:minmax(150px, .55fr) minmax(180px, .65fr) minmax(320px, 1.4fr); gap:12px; align-items:end; margin-top:12px; }
     details.advanced { border:1px dashed var(--line); border-radius:8px; margin-top:14px; background:var(--table-head); }
     details.advanced > summary { cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px; font-weight:800; }
     details.advanced > summary::marker { content:""; }
@@ -1760,6 +1762,7 @@ try {
                       <label><span class="label">服务端 Target</span><input name="reality_dest" value="<?= xsw_h((string)($entry['dest'] ?? '')) ?>" placeholder="例如 dl.google.com:443"></label>
                     </div>
                     <div class="reality-maintenance-footer">
+                      <label><span class="label">最小客户端版本</span><input name="reality_min_client_ver" value="<?= xsw_h((string)($entry['min_client_ver'] ?? '')) ?>" placeholder="默认留空，例如 0.0.0" inputmode="decimal"></label>
                       <label><span class="label">SpiderX</span><input name="reality_spider_x" value="<?= xsw_h((string)($entry['spider_x'] ?? '/')) ?>" placeholder="/"></label>
                       <div class="actions">
                         <button class="primary" type="submit" name="reality_mode" value="scan" data-confirm="将由这台节点调用 3X-UI 扫描器选择当前可用且延迟较低的 Reality 目标，不会更换 UUID、密钥或 Short ID。继续？">节点扫描优选</button>
@@ -1767,7 +1770,7 @@ try {
                         <button type="submit" name="reality_mode" value="next" data-confirm="会切换到下一个备用目标，不会更换 UUID、密钥或 Short ID。继续？">切换下一个备用</button>
                       </div>
                     </div>
-                    <p class="hint">“节点扫描优选”会调用该节点 3X-UI 自带的 Reality 扫描器，并按可用性与节点实测延迟选择目标。更新后会同步二维码和复制链接，再依次重启 Xray、3X-UI 面板；已导入设备的旧链接需要重新导入。</p>
+                    <p class="hint">最小客户端版本默认留空；遇到空值兼容问题时可填写 0.0.0。“节点扫描优选”会调用该节点 3X-UI 自带的 Reality 扫描器，并按可用性与节点实测延迟选择目标。更新后会同步二维码和复制链接，再依次重启 Xray、3X-UI 面板；已导入设备的旧链接需要重新导入。</p>
                   </form>
                 </details>
               <?php else: ?>
