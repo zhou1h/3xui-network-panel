@@ -33,3 +33,20 @@ jobs:
         run: bash -n deploy.sh install.sh update.sh uninstall.sh
       - name: Verify random management paths
         run: bash tests/deploy-path.sh
+      - name: Verify TLS certificate validation
+        run: |
+          openssl req -x509 -nodes -newkey rsa:2048 -sha256 -days 2 \
+            -subj '/CN=panel.example.com' \
+            -addext 'subjectAltName=DNS:panel.example.com' \
+            -keyout /tmp/panel.key -out /tmp/panel.crt >/dev/null 2>&1
+          bash deploy.sh --validate-tls /tmp/panel.crt /tmp/panel.key panel.example.com
+          if bash deploy.sh --validate-tls /tmp/panel.crt /tmp/panel.key wrong.example.com; then
+            echo 'hostname mismatch was not rejected' >&2
+            exit 1
+          fi
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+            -out /tmp/wrong.key >/dev/null 2>&1
+          if bash deploy.sh --validate-tls /tmp/panel.crt /tmp/wrong.key panel.example.com; then
+            echo 'certificate/private-key mismatch was not rejected' >&2
+            exit 1
+          fi

@@ -66,6 +66,21 @@ When a hostname is already available, configure it during deployment:
 sudo env PANEL_DOMAIN=panel.example.com bash /tmp/control-plane-deploy.sh
 ```
 
+To import a Cloudflare Origin Certificate or another existing certificate safely:
+
+```bash
+sudo env \
+  PANEL_DOMAIN=panel.example.com \
+  PANEL_TLS_CERT_FILE=/root/origin.pem \
+  PANEL_TLS_KEY_FILE=/root/origin.key \
+  bash /tmp/control-plane-deploy.sh
+```
+
+The deployer validates the certificate format, expiry, hostname coverage, and the
+certificate/private-key pair before installing both files as `root:root 0600` under
+`/etc/control-plane/tls/`. Updates preserve the installed certificate. Never commit
+the certificate private key or expose it in issues, README files, Actions output, or logs.
+
 Code is installed at the neutral path `/opt/control-plane/app`. The public URL
 does not use `/xui/`, `/xui-switcher/`, or another predictable path beginning
 with `x`. The generated path is stored at `/etc/control-plane/web-path` and is

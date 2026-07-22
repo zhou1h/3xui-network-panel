@@ -68,6 +68,20 @@ sudo bash /tmp/control-plane-deploy.sh
 sudo env PANEL_DOMAIN=panel.example.com bash /tmp/control-plane-deploy.sh
 ```
 
+使用 Cloudflare Origin Certificate 或已有正式证书时，通过文件路径安全导入：
+
+```bash
+sudo env \
+  PANEL_DOMAIN=panel.example.com \
+  PANEL_TLS_CERT_FILE=/root/origin.pem \
+  PANEL_TLS_KEY_FILE=/root/origin.key \
+  bash /tmp/control-plane-deploy.sh
+```
+
+安装器会检查证书格式、有效期、域名覆盖范围以及证书与私钥是否匹配，再以
+`root:root 0600` 保存到 `/etc/control-plane/tls/`。更新会保留已安装证书；证书和
+私钥只存在服务器上，不应写入 Git、README、Issue、Actions Secret 输出或部署日志。
+
 代码固定部署到中性目录 `/opt/control-plane/app`。管理 URL 不使用 `/xui/`、
 `/xui-switcher/` 或以 `x` 开头的固定路径；首次安装生成后保存在
 `/etc/control-plane/web-path`，更新时保持不变。终端只会显示实际路径，必须与管理密码一起安全保存。
@@ -96,8 +110,10 @@ sudo bash install.sh --reset-admin
 
 ### Web 服务器
 
-`deploy.sh` 会自动配置 HTTP/HTTPS Nginx，并生成独立的源站 TLS 证书供 Cloudflare Full 模式使用。
-Cloudflare Full (strict) 模式应换成受信任的 Cloudflare Origin Certificate 或公开 CA 证书。
+`deploy.sh` 会自动配置 HTTP/HTTPS Nginx。没有提供证书且服务器上也没有现有证书时，
+会生成独立的临时源站 TLS 证书供 Cloudflare Full 模式使用。Cloudflare Full (strict)
+模式应通过 `PANEL_TLS_CERT_FILE` 与 `PANEL_TLS_KEY_FILE` 导入 Cloudflare Origin
+Certificate 或公开 CA 证书；后续更新会校验并保留它。
 域名解析后可在同一服务器块上继续配置正式证书，
 但不要把随机管理路径改回可猜测的固定名称。Nginx 只向 PHP-FPM 开放 `index.php` 和 `qr.php`，
 运行数据、依赖、安装脚本和仓库文件均不能从 Web 访问。

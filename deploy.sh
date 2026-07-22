@@ -12,6 +12,8 @@ TLS_DIR="$CONFIG_DIR/tls"
 TLS_CERT="$TLS_DIR/origin.crt"
 TLS_KEY="$TLS_DIR/origin.key"
 PANEL_DOMAIN="${PANEL_DOMAIN:-}"
+PANEL_TLS_CERT_FILE="${PANEL_TLS_CERT_FILE:-}"
+PANEL_TLS_KEY_FILE="${PANEL_TLS_KEY_FILE:-}"
 
 log() { printf '[control-plane-deploy] %s\n' "$*"; }
 fail() { printf '[control-plane-deploy] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -23,9 +25,52 @@ generate_path() {
   '
 }
 
+validate_tls_pair() {
+  local cert_file="$1"
+  local key_file="$2"
+  local domain_name="${3:-}"
+  local cert_public_key
+  local private_public_key
+
+  [[ -r "$cert_file" ]] || fail "TLS certificate is not readable: $cert_file"
+  [[ -r "$key_file" ]] || fail "TLS private key is not readable: $key_file"
+  openssl x509 -in "$cert_file" -noout >/dev/null 2>&1 \
+    || fail "invalid TLS certificate: $cert_file"
+  openssl pkey -in "$key_file" -check -noout >/dev/null 2>&1 \
+    || fail "invalid TLS private key: $key_file"
+  openssl x509 -in "$cert_file" -checkend 86400 -noout >/dev/null 2>&1 \
+    || fail 'TLS certificate is expired or expires within 24 hours'
+
+  cert_public_key="$(
+    openssl x509 -in "$cert_file" -pubkey -noout \
+      | openssl pkey -pubin -outform DER 2>/dev/null \
+      | openssl dgst -sha256 | awk '{print $2}'
+  )"
+  private_public_key="$(
+    openssl pkey -in "$key_file" -pubout -outform DER 2>/dev/null \
+      | openssl dgst -sha256 | awk '{print $2}'
+  )"
+  [[ -n "$cert_public_key" && "$cert_public_key" == "$private_public_key" ]] \
+    || fail 'TLS certificate and private key do not match'
+
+  if [[ -n "$domain_name" ]]; then
+    LC_ALL=C openssl x509 -in "$cert_file" -noout -checkhost "$domain_name" 2>/dev/null \
+      | grep -q ' does match certificate$' \
+      || fail "TLS certificate does not cover PANEL_DOMAIN: $domain_name"
+  fi
+}
+
 if [[ "${1:-}" == "--generate-path" ]]; then
   command -v php >/dev/null 2>&1 || fail 'PHP is required to generate the path'
   generate_path
+  exit 0
+fi
+if [[ "${1:-}" == "--validate-tls" ]]; then
+  [[ $# -ge 3 && $# -le 4 ]] \
+    || fail 'usage: bash deploy.sh --validate-tls CERT_FILE KEY_FILE [DOMAIN]'
+  command -v openssl >/dev/null 2>&1 || fail 'OpenSSL is required to validate TLS files'
+  validate_tls_pair "$2" "$3" "${4:-}"
+  log 'TLS certificate and private key are valid and match'
   exit 0
 fi
 [[ $# -eq 0 ]] || fail 'usage: sudo bash deploy.sh'
@@ -68,6 +113,10 @@ mkdir -p "$APP_ROOT" "$CONFIG_DIR"
 chmod 0700 "$CONFIG_DIR"
 if [[ -n "$PANEL_DOMAIN" && ! "$PANEL_DOMAIN" =~ ^([A-Za-z0-9-]+\.)+[A-Za-z]{2,63}$ ]]; then
   fail 'PANEL_DOMAIN must be a valid DNS hostname'
+fi
+if [[ -n "$PANEL_TLS_CERT_FILE" || -n "$PANEL_TLS_KEY_FILE" ]]; then
+  [[ -n "$PANEL_TLS_CERT_FILE" && -n "$PANEL_TLS_KEY_FILE" ]] \
+    || fail 'PANEL_TLS_CERT_FILE and PANEL_TLS_KEY_FILE must be provided together'
 fi
 
 if [[ ! -d "$APP_DIR/.git" ]]; then
@@ -113,12 +162,24 @@ FPM_SOCKET="$(
 
 mkdir -p "$TLS_DIR"
 chmod 0700 "$TLS_DIR"
-if [[ ! -s "$TLS_CERT" || ! -s "$TLS_KEY" ]]; then
+if [[ -n "$PANEL_TLS_CERT_FILE" ]]; then
+  validate_tls_pair "$PANEL_TLS_CERT_FILE" "$PANEL_TLS_KEY_FILE" "$PANEL_DOMAIN"
+  install -o root -g root -m 0600 "$PANEL_TLS_CERT_FILE" "$TLS_CERT"
+  install -o root -g root -m 0600 "$PANEL_TLS_KEY_FILE" "$TLS_KEY"
+  log "installed supplied TLS certificate for ${PANEL_DOMAIN:-the configured origin}"
+elif [[ -s "$TLS_CERT" && -s "$TLS_KEY" ]]; then
+  validate_tls_pair "$TLS_CERT" "$TLS_KEY" "$PANEL_DOMAIN"
+  log 'preserved the existing origin TLS certificate'
+elif [[ -e "$TLS_CERT" || -e "$TLS_KEY" ]]; then
+  fail "incomplete TLS certificate pair in $TLS_DIR"
+else
   CERT_NAME="${PANEL_DOMAIN:-control-plane.local}"
   openssl req -x509 -nodes -newkey rsa:2048 -sha256 -days 825 \
     -subj "/CN=$CERT_NAME" \
     -addext "subjectAltName=DNS:$CERT_NAME" \
     -keyout "$TLS_KEY" -out "$TLS_CERT" >/dev/null 2>&1
+  validate_tls_pair "$TLS_CERT" "$TLS_KEY" "$PANEL_DOMAIN"
+  log 'generated a local origin TLS certificate; replace it before enabling Cloudflare Full (strict)'
 fi
 chmod 0600 "$TLS_KEY" "$TLS_CERT"
 
