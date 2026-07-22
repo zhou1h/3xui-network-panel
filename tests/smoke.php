@@ -70,6 +70,25 @@ $standalonePayload = xsw_standalone_vless_payload([
 assert_true(($standalonePayload['settings']['clients'][0]['email'] ?? '') === 'xsw-entry-single3-36000', 'standalone client identity changed');
 assert_true(($standalonePayload['streamSettings']['realitySettings']['target'] ?? '') === 'dl.google.com:443', 'standalone target maintenance payload is wrong');
 
+$orphanFixtureInbounds = [[
+    'settings' => json_encode(['clients' => [
+        ['email' => 'xsw-entry-single3-36000'],
+        ['email' => 'shared-client'],
+    ]]),
+]];
+$orphanFixtureClients = [
+    ['email' => 'xsw-entry-single3-36000'],
+    ['email' => 'xsw-relay-a-b-33100'],
+    ['email' => 'shared-client'],
+    ['email' => 'unrelated-manual-client'],
+];
+$orphans = xsw_orphaned_client_emails(
+    $orphanFixtureInbounds,
+    $orphanFixtureClients,
+    ['xsw-relay-a-b-33100', 'shared-client']
+);
+assert_true($orphans === ['xsw-relay-a-b-33100'], 'only detached candidate clients may be deleted');
+
 $state = xsw_default_state();
 $state['servers']['A'] = [
     'code' => 'A',

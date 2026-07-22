@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 date_default_timezone_set('Asia/Shanghai');
 
-const XSW_VERSION = '0.3.8';
+const XSW_VERSION = '0.3.9';
 const XSW_PREFIX = 'xsw_';
 const XSW_LEGACY_PREFIX = 'jd_';
 const XSW_DATA_DIR = __DIR__ . '/data';
@@ -1893,6 +1893,91 @@ function xsw_ensure_inbound(array $server, array $payload): string
     return 'created';
 }
 
+function xsw_inbound_client_emails(array $inbounds): array
+{
+    $emails = [];
+    foreach ($inbounds as $inbound) {
+        if (!is_array($inbound)) {
+            continue;
+        }
+        $settings = xsw_decode_maybe($inbound['settings'] ?? []);
+        foreach (($settings['clients'] ?? []) as $client) {
+            if (!is_array($client)) {
+                continue;
+            }
+            $email = trim((string)($client['email'] ?? ''));
+            if ($email !== '') {
+                $emails[$email] = true;
+            }
+        }
+    }
+    return array_keys($emails);
+}
+
+function xsw_orphaned_client_emails(array $inbounds, array $clientRecords, array $candidates): array
+{
+    $attached = array_fill_keys(xsw_inbound_client_emails($inbounds), true);
+    $existing = [];
+    foreach ($clientRecords as $record) {
+        if (!is_array($record)) {
+            continue;
+        }
+        $email = trim((string)($record['email'] ?? ''));
+        if ($email !== '') {
+            $existing[$email] = true;
+        }
+    }
+
+    $orphans = [];
+    foreach ($candidates as $candidate) {
+        $email = trim((string)$candidate);
+        if ($email !== '' && isset($existing[$email]) && !isset($attached[$email])) {
+            $orphans[$email] = true;
+        }
+    }
+    return array_keys($orphans);
+}
+
+function xsw_delete_orphaned_client_records(array $server, array $candidates): array
+{
+    $candidates = array_values(array_unique(array_filter(
+        array_map(fn($email) => trim((string)$email), $candidates),
+        fn($email) => $email !== ''
+    )));
+    if (!$candidates) {
+        return [];
+    }
+
+    try {
+        $inboundResponse = xsw_api($server, 'GET', '/panel/api/inbounds/list', null, false, 20);
+        $clientResponse = xsw_api($server, 'GET', '/panel/api/clients/list', null, false, 20);
+    } catch (Throwable $e) {
+        // Panels without the independent client API cannot retain records in
+        // that table, so there is nothing compatible to clean up here.
+        if (str_contains($e->getMessage(), 'HTTP 404')) {
+            return [];
+        }
+        throw $e;
+    }
+
+    $inbounds = is_array($inboundResponse['obj'] ?? null) ? $inboundResponse['obj'] : [];
+    $clients = is_array($clientResponse['obj'] ?? null) ? $clientResponse['obj'] : [];
+    $orphans = xsw_orphaned_client_emails($inbounds, $clients, $candidates);
+    foreach ($orphans as $email) {
+        xsw_api($server, 'POST', '/panel/api/clients/del/' . rawurlencode($email), [], false, 20);
+    }
+
+    if ($orphans) {
+        $verifyResponse = xsw_api($server, 'GET', '/panel/api/clients/list', null, false, 20);
+        $verifyClients = is_array($verifyResponse['obj'] ?? null) ? $verifyResponse['obj'] : [];
+        $remaining = xsw_orphaned_client_emails($inbounds, $verifyClients, $orphans);
+        if ($remaining) {
+            throw new RuntimeException('孤儿客户端清理失败：' . implode(', ', $remaining));
+        }
+    }
+    return $orphans;
+}
+
 function xsw_delete_inbound(array $server, int $port, string $remark): string
 {
     $list = xsw_api($server, 'GET', '/panel/api/inbounds/list');
@@ -1908,16 +1993,20 @@ function xsw_delete_inbound(array $server, int $port, string $remark): string
         $itemPort = (int)($item['port'] ?? 0);
         $itemRemark = (string)($item['remark'] ?? '');
         if ($itemPort === $port && $itemRemark === $remark) {
+            $clientEmails = xsw_inbound_client_emails([$item]);
             xsw_api($server, 'POST', '/panel/api/inbounds/del/' . $itemId);
-            return 'deleted';
+            $removedClients = xsw_delete_orphaned_client_records($server, $clientEmails);
+            return 'deleted' . ($removedClients ? ' + cleaned_clients:' . count($removedClients) : '');
         }
     }
     foreach ($items as $item) {
         $itemId = (int)($item['id'] ?? 0);
         $itemRemark = (string)($item['remark'] ?? '');
         if ($itemId > 0 && $itemRemark === $remark) {
+            $clientEmails = xsw_inbound_client_emails([$item]);
             xsw_api($server, 'POST', '/panel/api/inbounds/del/' . $itemId);
-            return 'deleted_by_remark';
+            $removedClients = xsw_delete_orphaned_client_records($server, $clientEmails);
+            return 'deleted_by_remark' . ($removedClients ? ' + cleaned_clients:' . count($removedClients) : '');
         }
     }
     return 'not_found';
