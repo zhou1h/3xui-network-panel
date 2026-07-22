@@ -42,6 +42,12 @@ assert_true(($presets[0]['dest'] ?? '') === 'dl.google.com:443', 'Google Android
 assert_true(xsw_validate_reality_hostname('AI.Android') === 'ai.android', 'SNI normalization failed');
 assert_true(xsw_normalize_reality_destination('DL.Google.com') === 'dl.google.com:443', 'Reality target normalization failed');
 assert_true(xsw_normalize_reality_spider_x('test') === '/test', 'SpiderX normalization failed');
+$compatibilityTarget = xsw_compatibility_reality_target(
+    array_replace(xsw_default_state()['settings'], ['reality_auto_target' => false]),
+    new RuntimeException('HTTP 404')
+);
+assert_true(($compatibilityTarget['source'] ?? '') === 'compatibility', 'old-node Reality fallback source is missing');
+assert_true(($compatibilityTarget['dest'] ?? '') === 'dl.google.com:443', 'old-node Reality fallback target is wrong');
 assert_true(xsw_reality_scan_sni([
     'target' => 'dl.google.com:443',
     'serverNames' => ['*.google.com', 'ai.android', 'dl.google.com'],

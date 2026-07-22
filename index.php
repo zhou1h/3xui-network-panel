@@ -1741,7 +1741,7 @@ try {
                 <details class="reality-maintenance">
                   <summary>
                     <span>Reality 目标维护</span>
-                    <span class="reality-current"><?= xsw_h((string)($entry['sni'] ?? '')) ?> → <?= xsw_h((string)($entry['dest'] ?? '')) ?></span>
+                    <span class="reality-current"><?= (string)($entry['reality_source'] ?? '') === 'node-scanner' ? '节点扫描 · ' : ((string)($entry['reality_source'] ?? '') === 'compatibility' ? '兼容目标 · ' : '') ?><?= xsw_h((string)($entry['sni'] ?? '')) ?> → <?= xsw_h((string)($entry['dest'] ?? '')) ?><?= isset($entry['target_latency_ms']) && $entry['target_latency_ms'] !== null ? ' · ' . (int)$entry['target_latency_ms'] . ' ms' : '' ?></span>
                   </summary>
                   <form method="post" class="reality-maintenance-body" onsubmit="return confirm((event.submitter && event.submitter.dataset.confirm) || '确定更新 Reality 目标？')">
                     <input type="hidden" name="action" value="update_standalone_reality">

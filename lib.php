@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 date_default_timezone_set('Asia/Shanghai');
 
-const XSW_VERSION = '0.3.7';
+const XSW_VERSION = '0.3.8';
 const XSW_PREFIX = 'xsw_';
 const XSW_LEGACY_PREFIX = 'jd_';
 const XSW_DATA_DIR = __DIR__ . '/data';
@@ -1203,13 +1203,13 @@ function xsw_build_plan(array &$state): array
             try {
                 $target = xsw_select_reality_target_for_server($state['servers'][$path[0]], $settings);
             } catch (Throwable $e) {
-                $target = xsw_select_reality_target($settings);
-                $target['scan_fallback'] = $e->getMessage();
+                $target = xsw_compatibility_reality_target($settings, $e);
             }
             $state['managed']['entries'][$lineId]['sni'] = $target['sni'];
             $state['managed']['entries'][$lineId]['dest'] = $target['dest'];
             $state['managed']['entries'][$lineId]['target_latency_ms'] = $target['latency_ms'];
             $state['managed']['entries'][$lineId]['reality_profile'] = (string)($target['id'] ?? 'compatibility-fallback');
+            $state['managed']['entries'][$lineId]['reality_source'] = (string)($target['source'] ?? 'compatibility');
             $state['managed']['entries'][$lineId]['reality_updated_at'] = time();
         }
         if (empty($state['managed']['entries'][$lineId]['fingerprint'])) {
@@ -1361,7 +1361,7 @@ function xsw_select_reality_target(array $settings): array
         $fallbackDest = $fallbackHost . ':443';
     }
     if (empty($settings['reality_auto_target'])) {
-        return ['sni' => $fallbackHost, 'dest' => $fallbackDest, 'latency_ms' => null];
+        return ['id' => 'configured', 'label' => '配置目标', 'sni' => $fallbackHost, 'dest' => $fallbackDest, 'latency_ms' => null, 'source' => 'configured'];
     }
 
     // Prefer a predictable, proven profile. The probe runs on the controller,
@@ -1371,13 +1371,26 @@ function xsw_select_reality_target(array $settings): array
         $score = xsw_probe_reality_candidate($destHost);
         if ($score !== null) {
             return [
+                'id' => (string)($preset['id'] ?? 'compatibility-preset'),
+                'label' => (string)($preset['label'] ?? '兼容目标'),
                 'sni' => (string)$preset['sni'],
                 'dest' => (string)$preset['dest'],
                 'latency_ms' => (int)round($score * 1000),
+                'source' => 'controller-probe',
             ];
         }
     }
-    return ['sni' => $fallbackHost, 'dest' => $fallbackDest, 'latency_ms' => null];
+    return ['id' => 'configured-fallback', 'label' => '配置保底目标', 'sni' => $fallbackHost, 'dest' => $fallbackDest, 'latency_ms' => null, 'source' => 'configured'];
+}
+
+function xsw_compatibility_reality_target(array $settings, Throwable|string $reason): array
+{
+    $target = xsw_select_reality_target($settings);
+    $target['id'] = 'compatibility-' . (string)($target['id'] ?? 'target');
+    $target['label'] = '兼容优选（节点扫描器不可用）';
+    $target['source'] = 'compatibility';
+    $target['scan_error'] = substr($reason instanceof Throwable ? $reason->getMessage() : $reason, 0, 240);
+    return $target;
 }
 
 function xsw_validate_reality_hostname(string $value, string $label = 'SNI'): string
@@ -1648,6 +1661,7 @@ function xsw_scan_reality_targets(array $server, string $targets = ''): array
             'latency_ms' => max(0, (int)($row['latencyMs'] ?? 0)),
             'tls_version' => (string)($row['tlsVersion'] ?? ''),
             'alpn' => (string)($row['alpn'] ?? ''),
+            'source' => 'node-scanner',
         ];
     }
     usort($usable, fn($a, $b) => (int)$a['latency_ms'] <=> (int)$b['latency_ms']);
@@ -2286,13 +2300,13 @@ function xsw_create_standalone_and_deploy(array &$state, string $name, string $s
             $target = xsw_select_reality_target_for_server($state['servers'][$serverCode], $settings);
         } catch (Throwable $e) {
             // Keep standalone creation compatible with older 3X-UI versions.
-            $target = xsw_select_reality_target($settings);
-            $target['scan_fallback'] = $e->getMessage();
+            $target = xsw_compatibility_reality_target($settings, $e);
         }
         $entry['sni'] = $target['sni'];
         $entry['dest'] = $target['dest'];
         $entry['target_latency_ms'] = $target['latency_ms'];
         $entry['reality_profile'] = (string)($target['id'] ?? 'compatibility-fallback');
+        $entry['reality_source'] = (string)($target['source'] ?? 'compatibility');
         $entry['reality_updated_at'] = time();
         $entry['fingerprint'] = (string)($settings['reality_fingerprint'] ?? 'chrome');
         $entry['spider_x'] = (string)($settings['reality_spider_x'] ?? '/');
@@ -2356,7 +2370,11 @@ function xsw_update_standalone_reality_and_deploy(
     $server = $state['servers'][$serverCode];
     $mode = in_array($mode, ['scan', 'next', 'manual'], true) ? $mode : 'manual';
     if ($mode === 'scan') {
-        $target = xsw_select_reality_target_for_server($server, $settings);
+        try {
+            $target = xsw_select_reality_target_for_server($server, $settings);
+        } catch (Throwable $e) {
+            $target = xsw_compatibility_reality_target($settings, $e);
+        }
     } elseif ($mode === 'next') {
         try {
             $target = xsw_select_reality_target_for_server(
@@ -2370,19 +2388,22 @@ function xsw_update_standalone_reality_and_deploy(
                 (string)($entry['sni'] ?? ''),
                 (string)($entry['dest'] ?? '')
             );
-            $target['scan_fallback'] = $e->getMessage();
+            $target['source'] = 'compatibility';
+            $target['scan_error'] = substr($e->getMessage(), 0, 240);
         }
     } elseif ($presetId !== '') {
         $target = xsw_reality_target_preset($settings, $presetId);
         if ($target === null) {
             throw new RuntimeException('选择的 Reality 预设不存在');
         }
+        $target['source'] = 'preset';
     } else {
         $target = [
             'id' => 'manual',
             'label' => '手动配置',
             'sni' => xsw_validate_reality_hostname($sni, 'SNI'),
             'dest' => xsw_normalize_reality_destination($dest),
+            'source' => 'manual',
         ];
     }
 
@@ -2393,6 +2414,8 @@ function xsw_update_standalone_reality_and_deploy(
     $updated['fingerprint'] = 'chrome';
     $updated['target_latency_ms'] = isset($target['latency_ms']) ? max(0, (int)$target['latency_ms']) : null;
     $updated['reality_profile'] = (string)($target['id'] ?? 'manual');
+    $updated['reality_source'] = (string)($target['source'] ?? 'manual');
+    $updated['reality_scan_note'] = (string)($target['scan_error'] ?? '');
     $updated['reality_updated_at'] = time();
 
     $payload = xsw_standalone_vless_payload($updated);
@@ -2401,7 +2424,7 @@ function xsw_update_standalone_reality_and_deploy(
     xsw_save_state($state);
 
     $results = [
-        ['step' => 'update reality target', 'server' => $serverCode, 'entry' => $entryId, 'result' => $ensureResult, 'sni' => $updated['sni'], 'target' => $updated['dest']],
+        ['step' => 'update reality target', 'server' => $serverCode, 'entry' => $entryId, 'result' => $ensureResult, 'source' => $updated['reality_source'], 'sni' => $updated['sni'], 'target' => $updated['dest']],
     ];
     xsw_restart_xray($server);
     $results[] = ['step' => 'restart xray', 'server' => $serverCode, 'result' => 'ok'];
