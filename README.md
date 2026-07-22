@@ -62,6 +62,12 @@ curl -fsSL https://raw.githubusercontent.com/zhou1h/3xui-network-panel/main/depl
 sudo bash /tmp/control-plane-deploy.sh
 ```
 
+已经有域名时可同时写入 Nginx：
+
+```bash
+sudo env PANEL_DOMAIN=panel.example.com bash /tmp/control-plane-deploy.sh
+```
+
 代码固定部署到中性目录 `/opt/control-plane/app`。管理 URL 不使用 `/xui/`、
 `/xui-switcher/` 或以 `x` 开头的固定路径；首次安装生成后保存在
 `/etc/control-plane/web-path`，更新时保持不变。终端只会显示实际路径，必须与管理密码一起安全保存。
@@ -90,7 +96,9 @@ sudo bash install.sh --reset-admin
 
 ### Web 服务器
 
-`deploy.sh` 会自动配置 HTTP Nginx。域名解析后可在同一服务器块上继续配置证书，
+`deploy.sh` 会自动配置 HTTP/HTTPS Nginx，并生成独立的源站 TLS 证书供 Cloudflare Full 模式使用。
+Cloudflare Full (strict) 模式应换成受信任的 Cloudflare Origin Certificate 或公开 CA 证书。
+域名解析后可在同一服务器块上继续配置正式证书，
 但不要把随机管理路径改回可猜测的固定名称。Nginx 只向 PHP-FPM 开放 `index.php` 和 `qr.php`，
 运行数据、依赖、安装脚本和仓库文件均不能从 Web 访问。
 

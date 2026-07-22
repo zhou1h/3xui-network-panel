@@ -60,6 +60,12 @@ curl -fsSL https://raw.githubusercontent.com/zhou1h/3xui-network-panel/main/depl
 sudo bash /tmp/control-plane-deploy.sh
 ```
 
+When a hostname is already available, configure it during deployment:
+
+```bash
+sudo env PANEL_DOMAIN=panel.example.com bash /tmp/control-plane-deploy.sh
+```
+
 Code is installed at the neutral path `/opt/control-plane/app`. The public URL
 does not use `/xui/`, `/xui-switcher/`, or another predictable path beginning
 with `x`. The generated path is stored at `/etc/control-plane/web-path` and is
@@ -81,7 +87,10 @@ To generate a new administrator password:
 sudo bash install.sh --reset-admin
 ```
 
-`deploy.sh` configures Nginx so only the random management entry point and the
+`deploy.sh` configures HTTP/HTTPS Nginx and creates a dedicated origin TLS
+certificate suitable for Cloudflare Full mode. Replace it with a trusted
+Cloudflare Origin Certificate or public-CA certificate when Full (strict) is
+enabled. Only the random management entry point and the
 required PHP endpoints are reachable. Runtime data, dependencies, repository
 files, and installation scripts return 404.
 
