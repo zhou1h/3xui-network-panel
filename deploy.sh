@@ -194,6 +194,12 @@ chmod 0600 "$TLS_KEY" "$TLS_CERT"
 TOKEN="${PANEL_PATH#/}"
 TOKEN="${TOKEN%/}"
 SERVER_NAME="${PANEL_DOMAIN:-_}"
+HOST_GUARD=''
+if [[ -n "$PANEL_DOMAIN" ]]; then
+  HOST_GUARD="    if (\$host != $PANEL_DOMAIN) {
+        return 404;
+    }"
+fi
 cat > "$NGINX_SITE" <<EOF
 server {
     listen 80 default_server;
@@ -206,6 +212,8 @@ server {
     ssl_certificate $TLS_CERT;
     ssl_certificate_key $TLS_KEY;
     ssl_protocols TLSv1.2 TLSv1.3;
+
+$HOST_GUARD
 
     add_header X-Robots-Tag "noindex, nofollow, noarchive" always;
     add_header X-Content-Type-Options "nosniff" always;

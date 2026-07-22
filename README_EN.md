@@ -84,6 +84,9 @@ the certificate private key or expose it in issues, README files, Actions output
 The first supplied `PANEL_DOMAIN` is stored in `/etc/control-plane/domain`. Later
 deployment runs keep using the saved hostname even when the variable is omitted;
 provide a new value explicitly when the management hostname changes.
+Once a hostname is configured, Nginx accepts that Host only. Requests for the
+random management path through an old hostname, the server IP, or another Host
+receive `404`.
 
 Code is installed at the neutral path `/opt/control-plane/app`. The public URL
 does not use `/xui/`, `/xui-switcher/`, or another predictable path beginning
