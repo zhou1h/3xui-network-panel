@@ -247,10 +247,12 @@ chown root:root "$CRON_FILE"
 chmod 0644 "$CRON_FILE"
 
 if command -v systemctl >/dev/null 2>&1; then
-  if systemctl list-unit-files --type=service 2>/dev/null | grep -q '^cron\.service'; then
+  if systemctl cat cron.service >/dev/null 2>&1; then
     systemctl enable --now cron.service
-  else
+  elif systemctl cat crond.service >/dev/null 2>&1; then
     systemctl enable --now crond.service
+  else
+    fail 'cron service unit was not found after installation'
   fi
 else
   service cron restart 2>/dev/null || service crond restart
