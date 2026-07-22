@@ -54,13 +54,17 @@ flowchart LR
 
 ## 安装
 
-推荐使用 Git 克隆，这样以后可以正常持续更新：
+推荐使用自动部署脚本。它会从 GitHub 克隆最新代码、安装 Nginx/PHP-FPM，
+并用系统加密随机数生成一个 49 位管理路径：
 
 ```bash
-git clone https://github.com/zhou1h/3xui-network-panel.git
-cd 3xui-network-panel
-sudo bash install.sh
+curl -fsSL https://raw.githubusercontent.com/zhou1h/3xui-network-panel/main/deploy.sh -o /tmp/control-plane-deploy.sh
+sudo bash /tmp/control-plane-deploy.sh
 ```
+
+代码固定部署到中性目录 `/opt/control-plane/app`。管理 URL 不使用 `/xui/`、
+`/xui-switcher/` 或以 `x` 开头的固定路径；首次安装生成后保存在
+`/etc/control-plane/web-path`，更新时保持不变。终端只会显示实际路径，必须与管理密码一起安全保存。
 
 安装器会：
 
@@ -69,7 +73,8 @@ sudo bash install.sh
 3. 按 `composer.lock` 恢复 PHP 依赖；
 4. 创建并保护 `data/`；
 5. 首次安装使用 PHP `random_int()` 生成 28 位高强度随机密码；
-6. 写入 `/etc/cron.d/3xui-network-panel` 并启动 cron 服务。
+6. 写入 `/etc/cron.d/3xui-network-panel` 并启动 cron 服务；
+7. 配置 Nginx，使随机路径之外的请求以及 `data/`、源码文件全部返回 404。
 
 随机管理密码只在终端显示一次，不写入 Git、运行日志或固定模板。请立即保存到密码管理器。自动识别不到 Web 服务账户时，显式指定：
 
@@ -85,22 +90,16 @@ sudo bash install.sh --reset-admin
 
 ### Web 服务器
 
-把站点根目录或子路径指向本项目目录，并确保 PHP 请求能够执行。Nginx 还应直接拒绝访问运行数据：
-
-```nginx
-location ^~ /xui-switcher/data/ {
-    return 404;
-}
-```
-
-如果项目部署在域名根目录，请将路径改为 `location ^~ /data/`。不要关闭 `data/*.php` 自带的 404 防护。
+`deploy.sh` 会自动配置 HTTP Nginx。域名解析后可在同一服务器块上继续配置证书，
+但不要把随机管理路径改回可猜测的固定名称。Nginx 只向 PHP-FPM 开放 `index.php` 和 `qr.php`，
+运行数据、依赖、安装脚本和仓库文件均不能从 Web 访问。
 
 ## 正常持续更新
 
 在 Git 克隆目录中执行：
 
 ```bash
-cd /www/wwwroot/你的域名/3xui-network-panel
+cd /opt/control-plane/app
 bash update.sh
 ```
 

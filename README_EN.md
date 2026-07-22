@@ -51,13 +51,19 @@ The installer provisions PHP 8.0+, PHP cURL/mbstring/SQLite3/XML, SQLite, cron/c
 
 ## Install
 
-Use a Git clone so future updates can be applied normally:
+Use the automated deployer. It clones the latest GitHub revision, provisions
+Nginx/PHP-FPM, and generates a 49-character management path from the operating
+system CSPRNG:
 
 ```bash
-git clone https://github.com/zhou1h/3xui-network-panel.git
-cd 3xui-network-panel
-sudo bash install.sh
+curl -fsSL https://raw.githubusercontent.com/zhou1h/3xui-network-panel/main/deploy.sh -o /tmp/control-plane-deploy.sh
+sudo bash /tmp/control-plane-deploy.sh
 ```
+
+Code is installed at the neutral path `/opt/control-plane/app`. The public URL
+does not use `/xui/`, `/xui-switcher/`, or another predictable path beginning
+with `x`. The generated path is stored at `/etc/control-plane/web-path` and is
+preserved by updates. Store it together with the administrator password.
 
 The installer verifies the distribution, installs runtime dependencies, validates the Composer installer signature, restores `vendor/` from `composer.lock`, secures `data/`, installs `/etc/cron.d/3xui-network-panel`, and starts cron.
 
@@ -75,20 +81,16 @@ To generate a new administrator password:
 sudo bash install.sh --reset-admin
 ```
 
-Protect runtime data in Nginx (adjust the prefix to match your deployment):
-
-```nginx
-location ^~ /xui-switcher/data/ {
-    return 404;
-}
-```
+`deploy.sh` configures Nginx so only the random management entry point and the
+required PHP endpoints are reachable. Runtime data, dependencies, repository
+files, and installation scripts return 404.
 
 ## Continuous updates
 
 From the Git clone:
 
 ```bash
-cd /www/wwwroot/example/3xui-network-panel
+cd /opt/control-plane/app
 bash update.sh
 ```
 

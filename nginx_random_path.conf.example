@@ -1,0 +1,14 @@
+# deploy.sh generates the real server block with a cryptographically random
+# management path. This file only documents the intended access policy.
+
+location = /__RANDOM_MANAGEMENT_PATH__/ {
+    # Pass only the application entry point to PHP-FPM.
+}
+
+location ^~ /__RANDOM_MANAGEMENT_PATH__/data/ {
+    return 404;
+}
+
+location / {
+    return 404;
+}

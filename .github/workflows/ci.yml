@@ -30,4 +30,6 @@ jobs:
       - name: Run smoke tests
         run: php tests/smoke.php
       - name: Check shell scripts
-        run: bash -n install.sh update.sh uninstall.sh
+        run: bash -n deploy.sh install.sh update.sh uninstall.sh
+      - name: Verify random management paths
+        run: bash tests/deploy-path.sh
