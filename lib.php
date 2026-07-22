@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 date_default_timezone_set('Asia/Shanghai');
 
-const XSW_VERSION = '0.3.4';
+const XSW_VERSION = '0.3.5';
 const XSW_PREFIX = 'xsw_';
 const XSW_LEGACY_PREFIX = 'jd_';
 const XSW_DATA_DIR = __DIR__ . '/data';

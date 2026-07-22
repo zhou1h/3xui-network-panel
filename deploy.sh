@@ -6,6 +6,7 @@ APP_ROOT="${APP_ROOT:-/opt/control-plane}"
 APP_DIR="$APP_ROOT/app"
 CONFIG_DIR="/etc/control-plane"
 PATH_FILE="$CONFIG_DIR/web-path"
+DOMAIN_FILE="$CONFIG_DIR/domain"
 NGINX_SITE="/etc/nginx/sites-available/control-plane"
 NGINX_LINK="/etc/nginx/sites-enabled/control-plane"
 TLS_DIR="$CONFIG_DIR/tls"
@@ -111,8 +112,15 @@ if [[ -e "$APP_DIR" && ! -d "$APP_DIR/.git" ]]; then
 fi
 mkdir -p "$APP_ROOT" "$CONFIG_DIR"
 chmod 0700 "$CONFIG_DIR"
+if [[ -z "$PANEL_DOMAIN" && -s "$DOMAIN_FILE" ]]; then
+  PANEL_DOMAIN="$(tr -d '\r\n' < "$DOMAIN_FILE")"
+fi
 if [[ -n "$PANEL_DOMAIN" && ! "$PANEL_DOMAIN" =~ ^([A-Za-z0-9-]+\.)+[A-Za-z]{2,63}$ ]]; then
   fail 'PANEL_DOMAIN must be a valid DNS hostname'
+fi
+if [[ -n "$PANEL_DOMAIN" ]]; then
+  printf '%s\n' "$PANEL_DOMAIN" > "$DOMAIN_FILE"
+  chmod 0600 "$DOMAIN_FILE"
 fi
 if [[ -n "$PANEL_TLS_CERT_FILE" || -n "$PANEL_TLS_KEY_FILE" ]]; then
   [[ -n "$PANEL_TLS_CERT_FILE" && -n "$PANEL_TLS_KEY_FILE" ]] \

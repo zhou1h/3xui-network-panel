@@ -82,6 +82,9 @@ sudo env \
 `root:root 0600` 保存到 `/etc/control-plane/tls/`。更新会保留已安装证书；证书和
 私钥只存在服务器上，不应写入 Git、README、Issue、Actions Secret 输出或部署日志。
 
+首次提供的 `PANEL_DOMAIN` 会保存到 `/etc/control-plane/domain`。之后重新运行部署程序时，
+即使没有再次传入该变量，也会继续使用已保存的域名；需要更换域名时重新传入新值即可。
+
 代码固定部署到中性目录 `/opt/control-plane/app`。管理 URL 不使用 `/xui/`、
 `/xui-switcher/` 或以 `x` 开头的固定路径；首次安装生成后保存在
 `/etc/control-plane/web-path`，更新时保持不变。终端只会显示实际路径，必须与管理密码一起安全保存。

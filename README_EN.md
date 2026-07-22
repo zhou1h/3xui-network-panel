@@ -81,6 +81,10 @@ certificate/private-key pair before installing both files as `root:root 0600` un
 `/etc/control-plane/tls/`. Updates preserve the installed certificate. Never commit
 the certificate private key or expose it in issues, README files, Actions output, or logs.
 
+The first supplied `PANEL_DOMAIN` is stored in `/etc/control-plane/domain`. Later
+deployment runs keep using the saved hostname even when the variable is omitted;
+provide a new value explicitly when the management hostname changes.
+
 Code is installed at the neutral path `/opt/control-plane/app`. The public URL
 does not use `/xui/`, `/xui-switcher/`, or another predictable path beginning
 with `x`. The generated path is stored at `/etc/control-plane/web-path` and is
